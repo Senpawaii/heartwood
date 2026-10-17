@@ -38,8 +38,8 @@ export function makeTown(rules: Rules = defaultRules) {
     formWarband(
       foreman: string,
       members: string[] = [],
-      runId = `run_${++n}`,
-    ): { warbandId: string; runId: string } {
+      groupRef = `run_${++n}`,
+    ): { warbandId: string; groupRef: string } {
       const warbandId = `wb_${++n}`;
       log.append([
         {
@@ -57,13 +57,13 @@ export function makeTown(rules: Rules = defaultRules) {
           correlation: { warbandId },
         },
         {
-          type: "orca.run_created",
-          payload: { warbandId, runId, objective: "ship it" },
-          actor: { kind: "orca" },
-          correlation: { warbandId, runId },
+          type: "backend.group_created",
+          payload: { warbandId, backend: "fake", groupRef, objective: "ship it" },
+          actor: { kind: "backend" },
+          correlation: { warbandId, groupRef },
         },
       ]);
-      return { warbandId, runId };
+      return { warbandId, groupRef };
     },
     /** Create a dispatch and start a worker body for it. */
     async dispatch(warbandId: string, soulId: string, workerId: string, b = brief()) {
@@ -76,7 +76,7 @@ export function makeTown(rules: Rules = defaultRules) {
             bodyId,
             soulId,
             dispatchId: d.dispatchId,
-            orcaDispatchId: workerId,
+            workerRef: workerId,
             agent: "claude",
             worktree: "new-child",
           },

@@ -96,13 +96,13 @@ export interface BodyView {
   bodyId: string;
   soulId: string;
   dispatchId: string;
-  orcaDispatchId: string;
+  workerRef: string;
   liveness: string | null;
   disposition: string | null;
 }
 
-export function getBodyByOrcaDispatch(db: Db, orcaDispatchId: string): BodyView | undefined {
-  const r = db.prepare("SELECT * FROM bodies WHERE orca_dispatch_id = ?").get(orcaDispatchId) as
+export function getBodyByWorkerRef(db: Db, workerRef: string): BodyView | undefined {
+  const r = db.prepare("SELECT * FROM bodies WHERE worker_ref = ?").get(workerRef) as
     | Record<string, string | null>
     | undefined;
   if (!r) return undefined;
@@ -110,7 +110,7 @@ export function getBodyByOrcaDispatch(db: Db, orcaDispatchId: string): BodyView 
     bodyId: r.body_id as string,
     soulId: r.soul_id as string,
     dispatchId: r.dispatch_id as string,
-    orcaDispatchId: r.orca_dispatch_id as string,
+    workerRef: r.worker_ref as string,
     liveness: r.liveness ?? null,
     disposition: r.disposition ?? null,
   };
@@ -121,7 +121,7 @@ export function getBody(db: Db, bodyId: string): (BodyView & { agent: string }) 
     | Record<string, string | null>
     | undefined;
   if (!r) return undefined;
-  return { ...getBodyByOrcaDispatch(db, r.orca_dispatch_id as string)!, agent: r.agent as string };
+  return { ...getBodyByWorkerRef(db, r.worker_ref as string)!, agent: r.agent as string };
 }
 
 export interface SkillUsageStat {

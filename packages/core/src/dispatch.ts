@@ -51,7 +51,7 @@ export interface CreatedDispatch {
  */
 export async function createDispatch(
   ctx: LabCtx,
-  o: { warbandId: string; soulId: string; brief: TaskBrief; k?: number; orcaTaskId?: string },
+  o: { warbandId: string; soulId: string; brief: TaskBrief; k?: number; taskRef?: string },
 ): Promise<CreatedDispatch> {
   const query = Object.values(o.brief).join("\n");
   const memories = retrieveMemories(ctx.db, { soulId: o.soulId, query, k: o.k ?? 5 });
@@ -81,7 +81,7 @@ export async function createDispatch(
         specHash: createHash("sha256").update(spec).digest("hex"),
         memoryIds,
         skills,
-        orcaTaskId: o.orcaTaskId,
+        taskRef: o.taskRef,
       },
       actor: { kind: "foreman" },
       correlation,

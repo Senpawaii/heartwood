@@ -29,12 +29,12 @@ describe("event log", () => {
     expect(listSouls(t.db)).toEqual([]);
   });
 
-  it("skips events whose (type, orcaMessageId) was already appended", () => {
+  it("skips events whose (type, messageId) was already appended", () => {
     const t = makeTown();
     const q = {
       type: "question.asked" as const,
-      payload: { questionId: "q", text: "?", orcaMessageId: "m1" },
-      actor: { kind: "orca" as const },
+      payload: { questionId: "q", text: "?", messageId: "m1" },
+      actor: { kind: "backend" as const },
     };
     expect(t.log.append([q])).toHaveLength(1);
     expect(t.log.append([q])).toHaveLength(0);

@@ -1,2 +1,2 @@
-export * from "./orca/cliGateway.js";
+export * from "./orca/orcaBackend.js";
 export * from "./orca/runner.js";

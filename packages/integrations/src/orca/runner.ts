@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
-import { OrcaCliError } from "@heartwood/core";
+import { BackendError } from "@heartwood/core";
 import { execa } from "execa";
 
 export interface RunOptions {
@@ -28,7 +28,7 @@ const isFile = (p: string) => existsSync(p) && statSync(p).isFile();
 export function resolveBinary(bin: string, env: NodeJS.ProcessEnv = process.env): string {
   const win = process.platform === "win32";
   if (/\.(cmd|bat)$/i.test(bin)) {
-    throw new OrcaCliError(
+    throw new BackendError(
       `orca binary "${bin}" is a shell shim and cannot be spawned without a shell; use orca.exe or "orca"`,
       "orca_shim_unsupported",
     );
@@ -42,7 +42,7 @@ export function resolveBinary(bin: string, env: NodeJS.ProcessEnv = process.env)
       if (isFile(candidate)) return candidate;
     }
   }
-  throw new OrcaCliError(`orca binary not found: ${bin}`, "orca_not_found");
+  throw new BackendError(`orca binary not found: ${bin}`, "orca_not_found");
 }
 
 /** Spawns the Orca CLI with an argv array and NO shell. Resolution happens on first use. */
@@ -62,7 +62,7 @@ export function execaRunner(bin = "orca", env?: Record<string, string | undefine
       extendEnv: true,
     });
     if (r.isCanceled) return { exitCode: 130, stdout: "", stderr: "cancelled" };
-    if (r.timedOut) throw new OrcaCliError(`orca timed out after ${opts.timeoutMs}ms`, "timeout");
+    if (r.timedOut) throw new BackendError(`orca timed out after ${opts.timeoutMs}ms`, "timeout");
     return {
       exitCode: r.exitCode ?? 1,
       stdout: String(r.stdout ?? ""),

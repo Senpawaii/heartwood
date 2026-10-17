@@ -103,14 +103,14 @@ export function applyProjections(db: Db, e: HeartwoodEvent, rules: Rules): void 
     case "body.spawned": {
       const p = e.payload;
       db.prepare(
-        `INSERT INTO bodies (body_id, soul_id, dispatch_id, orca_dispatch_id, orca_terminal_handle, agent, model, worktree, spawned_at)
+        `INSERT INTO bodies (body_id, soul_id, dispatch_id, worker_ref, worker_locator, agent, model, worktree, spawned_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         p.bodyId,
         p.soulId,
         p.dispatchId,
-        p.orcaDispatchId,
-        p.orcaTerminalHandle ?? null,
+        p.workerRef,
+        p.workerLocator ?? null,
         p.agent,
         p.model ?? null,
         p.worktree,
@@ -168,9 +168,9 @@ export function applyProjections(db: Db, e: HeartwoodEvent, rules: Rules): void 
         e.payload.warbandId,
       );
       break;
-    case "orca.run_created":
-      db.prepare("UPDATE warbands SET run_id = ? WHERE warband_id = ?").run(
-        e.payload.runId,
+    case "backend.group_created":
+      db.prepare("UPDATE warbands SET group_ref = ? WHERE warband_id = ?").run(
+        e.payload.groupRef,
         e.payload.warbandId,
       );
       break;
@@ -178,7 +178,7 @@ export function applyProjections(db: Db, e: HeartwoodEvent, rules: Rules): void 
     case "dispatch.created": {
       const p = e.payload;
       db.prepare(
-        `INSERT INTO dispatches (dispatch_id, warband_id, soul_id, spec_hash, skills, memory_ids, orca_task_id, created_at)
+        `INSERT INTO dispatches (dispatch_id, warband_id, soul_id, spec_hash, skills, memory_ids, task_ref, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         p.dispatchId,
@@ -187,7 +187,7 @@ export function applyProjections(db: Db, e: HeartwoodEvent, rules: Rules): void 
         p.specHash,
         JSON.stringify(p.skills),
         JSON.stringify(p.memoryIds),
-        p.orcaTaskId ?? null,
+        p.taskRef ?? null,
         e.at,
       );
       break;

@@ -24,7 +24,7 @@ export type Subscriber = (event: HeartwoodEvent) => void;
  */
 export interface EventLog {
   /**
-   * Atomically validates, appends and projects. Events whose (type, orcaMessageId) already
+   * Atomically validates, appends and projects. Events whose (type, messageId) already
    * exist are skipped, so replayed Orca batches are idempotent. Returns only appended events.
    */
   append(events: readonly NewEvent[]): HeartwoodEvent[];
@@ -74,7 +74,7 @@ export class SqliteEventLog implements EventLog {
   append(events: readonly NewEvent[]): HeartwoodEvent[] {
     return this.transaction(() => {
       const insert = this.db.prepare(
-        `INSERT INTO events (id, at, type, v, actor, correlation, caused_by, orca_message_id, payload)
+        `INSERT INTO events (id, at, type, v, actor, correlation, caused_by, message_id, payload)
          VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
       );
       const out: HeartwoodEvent[] = [];
@@ -82,7 +82,7 @@ export class SqliteEventLog implements EventLog {
         const e = validateNewEvent(raw);
         const id = ulid();
         const at = this.now().toISOString();
-        const payload = e.payload as { orcaMessageId?: string };
+        const payload = e.payload as { messageId?: string };
         const res = insert.run(
           id,
           at,
@@ -90,7 +90,7 @@ export class SqliteEventLog implements EventLog {
           JSON.stringify(e.actor),
           JSON.stringify(e.correlation ?? {}),
           e.causedBy ?? null,
-          payload.orcaMessageId ?? null,
+          payload.messageId ?? null,
           JSON.stringify(e.payload),
         );
         if (res.changes === 0) continue;

@@ -27,8 +27,8 @@ const ProofRef = z.object({ kind: z.enum(["benchmark", "project"]), ref: z.strin
  * Heartbeats are intentionally NOT events: the gateway drops them at translation and keeps
  * only the last heartbeat time in a projection.
  *
- * Events originating from one Orca mailbox message carry `orcaMessageId`; the log enforces
- * uniqueness per (type, orcaMessageId) so replayed batches are idempotent.
+ * Events originating from one Orca mailbox message carry `messageId`; the log enforces
+ * uniqueness per (type, messageId) so replayed batches are idempotent.
  */
 export const payloadSchemas = {
   // town
@@ -82,8 +82,8 @@ export const payloadSchemas = {
     bodyId: Id,
     soulId: Id,
     dispatchId: Id,
-    orcaDispatchId: z.string(),
-    orcaTerminalHandle: z.string().optional(),
+    workerRef: z.string(),
+    workerLocator: z.string().optional(),
     agent: BodyAgent,
     model: z.string().optional(),
     worktree: z.string(),
@@ -115,7 +115,7 @@ export const payloadSchemas = {
     specHash: z.string(),
     memoryIds: strings,
     skills: z.array(PinnedSkill),
-    orcaTaskId: z.string().optional(),
+    taskRef: z.string().optional(),
   }),
   "dispatch.started": z.object({ dispatchId: Id, bodyId: Id }),
   "dispatch.settled": z.object({
@@ -131,54 +131,66 @@ export const payloadSchemas = {
     from: ActorRef,
     level: EscalationLevel,
     reason: z.string(),
-    orcaMessageId: z.string().optional(),
+    messageId: z.string().optional(),
   }),
   "escalation.resolved": z.object({ escalationId: Id, resolution: z.string() }),
   "question.asked": z.object({
     questionId: Id,
     dispatchId: Id.optional(),
     text: z.string(),
-    orcaMessageId: z.string().optional(),
+    messageId: z.string().optional(),
   }),
   "question.answered": z.object({ questionId: Id, answer: z.string() }),
 
   // orca lifecycle
-  "orca.run_created": z.object({ warbandId: Id, runId: z.string(), objective: z.string() }),
-  "orca.task_created": z.object({ runId: z.string(), taskId: z.string(), deps: strings }),
-  "orca.mailbox_batch": z.object({
-    runId: z.string(),
+  "backend.group_created": z.object({
+    warbandId: Id,
+    /** Which backend adapter owns this group (e.g. "orca"). */
+    backend: z.string(),
+    /** Opaque backend id of the worker group (Orca: Run). */
+    groupRef: z.string(),
+    objective: z.string(),
+  }),
+  "backend.task_created": z.object({ groupRef: z.string(), taskRef: z.string(), deps: strings }),
+  "backend.mailbox_batch": z.object({
+    groupRef: z.string(),
     messageIds: strings,
     heartbeatsDropped: z.number().int().nonnegative(),
     /** First message id of the batch; makes a replayed batch idempotent. */
-    orcaMessageId: z.string().optional(),
+    messageId: z.string().optional(),
   }),
-  "orca.worker_done": z.object({
-    runId: z.string(),
-    orcaMessageId: z.string(),
-    /** Orca's Dispatch id (`ctx_…`); this is how Orca addresses a worker. */
-    orcaDispatchId: z.string(),
+  "backend.worker_done": z.object({
+    groupRef: z.string(),
+    messageId: z.string(),
+    /** Opaque backend id of the worker (Orca: Dispatch id `ctx_…`). */
+    workerRef: z.string(),
     outcome: Outcome,
     summary: z.string().optional(),
   }),
-  /** Orca refused a lifecycle message (e.g. stale or unknown dispatch). It settles nothing. */
-  "orca.message_rejected": z.object({
-    runId: z.string(),
-    orcaMessageId: z.string(),
+  /** The backend refused a lifecycle message (e.g. stale or unknown worker). It settles nothing. */
+  "backend.message_rejected": z.object({
+    groupRef: z.string(),
+    messageId: z.string(),
+    /** The backend's own message type, kept for diagnosis. */
     messageType: z.string(),
     code: z.string(),
     reason: z.string().optional(),
   }),
-  "orca.unknown_message": z.object({
-    runId: z.string(),
-    orcaMessageId: z.string(),
+  "backend.unknown_message": z.object({
+    groupRef: z.string(),
+    messageId: z.string(),
     messageType: z.string(),
   }),
-  "orca.poll_failed": z.object({
-    runId: z.string(),
+  "backend.poll_failed": z.object({
+    groupRef: z.string(),
     consecutiveFailures: z.number().int().positive(),
     error: z.string(),
   }),
-  "orca.cli_incompatible": z.object({ version: z.string().optional(), reason: z.string() }),
+  "backend.incompatible": z.object({
+    backend: z.string(),
+    version: z.string().optional(),
+    problems: strings,
+  }),
 
   // memory
   "memory.persona_set": z.object({ memory: MemoryRecord }),
@@ -240,14 +252,14 @@ export const eventTypes = Object.keys(payloadSchemas) as EventType[];
 export type EventPayloads = { [K in EventType]: z.infer<EventPayloadSchemas[K]> };
 
 export const Actor = z.object({
-  kind: z.enum(["sovereign", "mayor", "soul", "foreman", "daemon", "warden", "orca"]),
+  kind: z.enum(["sovereign", "mayor", "soul", "foreman", "daemon", "warden", "backend"]),
   id: z.string().optional(),
 });
 export type Actor = z.infer<typeof Actor>;
 
 export const Correlation = z.object({
   warbandId: z.string().optional(),
-  runId: z.string().optional(),
+  groupRef: z.string().optional(),
   taskId: z.string().optional(),
   dispatchId: z.string().optional(),
   soulId: z.string().optional(),

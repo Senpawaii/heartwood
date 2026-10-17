@@ -14,12 +14,12 @@ const migrations: string[] = [
     actor TEXT NOT NULL,
     correlation TEXT NOT NULL,
     caused_by TEXT,
-    orca_message_id TEXT,
+    message_id TEXT,
     payload TEXT NOT NULL
   );
   CREATE INDEX events_type ON events(type, seq);
-  -- replayed Orca batches must not produce duplicate events
-  CREATE UNIQUE INDEX events_orca_msg ON events(type, orca_message_id) WHERE orca_message_id IS NOT NULL;
+  -- replayed backend batches must not produce duplicate events
+  CREATE UNIQUE INDEX events_message ON events(type, message_id) WHERE message_id IS NOT NULL;
 
   CREATE TABLE souls (
     soul_id TEXT PRIMARY KEY, name TEXT NOT NULL, species TEXT NOT NULL, ministry_id TEXT NOT NULL,
@@ -36,21 +36,21 @@ const migrations: string[] = [
     compute_seconds REAL NOT NULL, cost_usd REAL, at TEXT NOT NULL, PRIMARY KEY (scope, soul_id));
 
   CREATE TABLE bodies (
-    body_id TEXT PRIMARY KEY, soul_id TEXT NOT NULL, dispatch_id TEXT NOT NULL, orca_dispatch_id TEXT NOT NULL, orca_terminal_handle TEXT,
+    body_id TEXT PRIMARY KEY, soul_id TEXT NOT NULL, dispatch_id TEXT NOT NULL, worker_ref TEXT NOT NULL, worker_locator TEXT,
     agent TEXT NOT NULL, model TEXT, worktree TEXT NOT NULL, liveness TEXT, disposition TEXT, spawned_at TEXT NOT NULL
   );
-  CREATE INDEX bodies_worker ON bodies(orca_dispatch_id);
+  CREATE INDEX bodies_worker ON bodies(worker_ref);
 
   CREATE TABLE warbands (
     warband_id TEXT PRIMARY KEY, objective TEXT NOT NULL, foreman_soul_id TEXT NOT NULL,
-    run_id TEXT, status TEXT NOT NULL DEFAULT 'active'
+    group_ref TEXT, status TEXT NOT NULL DEFAULT 'active'
   );
   CREATE TABLE warband_members (warband_id TEXT NOT NULL, soul_id TEXT NOT NULL, role TEXT NOT NULL,
     PRIMARY KEY (warband_id, soul_id));
 
   CREATE TABLE dispatches (
     dispatch_id TEXT PRIMARY KEY, warband_id TEXT NOT NULL, soul_id TEXT NOT NULL, spec_hash TEXT NOT NULL,
-    skills TEXT NOT NULL, memory_ids TEXT NOT NULL, orca_task_id TEXT, body_id TEXT,
+    skills TEXT NOT NULL, memory_ids TEXT NOT NULL, task_ref TEXT, body_id TEXT,
     state TEXT NOT NULL DEFAULT 'created', outcome TEXT, summary TEXT, created_at TEXT NOT NULL
   );
 
@@ -70,8 +70,11 @@ const migrations: string[] = [
   CREATE TABLE proficiency_points (seq INTEGER NOT NULL, at TEXT NOT NULL, soul_id TEXT NOT NULL, skill_name TEXT NOT NULL,
     uses INTEGER NOT NULL, score REAL NOT NULL, PRIMARY KEY (seq, soul_id, skill_name));
 
+  -- small durable adapter state (e.g. a provisioned identity); not event-sourced
+  CREATE TABLE kv (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (namespace, key));
+
   -- ephemeral: heartbeats are not events
-  CREATE TABLE worker_heartbeats (orca_dispatch_id TEXT PRIMARY KEY, at TEXT NOT NULL);
+  CREATE TABLE worker_heartbeats (worker_ref TEXT PRIMARY KEY, at TEXT NOT NULL);
 
   CREATE TABLE memories (
     memory_id TEXT PRIMARY KEY, layer TEXT NOT NULL, owner_soul_id TEXT, text TEXT NOT NULL, tags TEXT NOT NULL,
