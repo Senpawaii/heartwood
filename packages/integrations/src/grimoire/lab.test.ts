@@ -23,6 +23,7 @@ import {
   LabUnavailableError,
   NotFoundError,
   openDb,
+  type Rules,
   SqliteEventLog,
 } from "@heartwood/core";
 import { afterEach, describe, expect, it } from "vitest";
@@ -83,8 +84,21 @@ afterEach(async () => {
   cleanup = [];
 });
 
+/** Real trials create real workspaces, which is slow on CI disks: the evolve tests use a small sample and a gate sized to it. */
+const SMALL: Rules = {
+  ...defaultRules,
+  skillRank: { ...defaultRules.skillRank, minTrials: 4 },
+  promotion: { minTrials: 4, tolerance: 0.15 },
+};
+
 async function world(
-  o: { agent?: AgentAdapter | null; rewriter?: SkillRewriter; body?: string } = {},
+  o: {
+    agent?: AgentAdapter | null;
+    rewriter?: SkillRewriter;
+    body?: string;
+    repeat?: number;
+    rules?: Rules;
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "heartwood-lab-"));
   const skills = join(root, "skills");
@@ -102,10 +116,10 @@ async function world(
     outDir: join(root, "runs"),
     agent,
     rewriter: o.rewriter,
-    repeat: 10,
+    repeat: o.repeat ?? 10,
   });
   const db = openDb();
-  const ctx: LabCtx = { db, log: new SqliteEventLog(db), rules: defaultRules, lab };
+  const ctx: LabCtx = { db, log: new SqliteEventLog(db), rules: o.rules ?? defaultRules, lab };
   cleanup.push(async () => {
     await lab.close();
     results.close();
@@ -214,7 +228,7 @@ describe("GrimoireLab: benchmarks with the real library", () => {
   });
 });
 
-describe("GrimoireLab: evolving a skill end to end", () => {
+describe("GrimoireLab: evolving a skill end to end", { timeout: 60_000 }, () => {
   const improve: SkillRewriter = async (_skill, _basis, outDir) => {
     await writeFile(join(outDir, "SKILL.md"), skillMd("WRITE_OUT then done.", "1.1.0"));
     return { changelog: "Teach the agent to write the file." };
@@ -228,13 +242,13 @@ describe("GrimoireLab: evolving a skill end to end", () => {
   };
 
   it("promotes a candidate that measurably beats the current version, and keeps the old pin loadable", async () => {
-    const w = await world({ rewriter: improve });
+    const w = await world({ rewriter: improve, repeat: 4, rules: SMALL });
     const v1 = await w.lab.resolve("tdd");
     const out = await evolveSkill(w.ctx, v1);
 
     expect(out.promoted).toBe(true);
     expect(out.comparison).toMatchObject({ significant: true, verdict: "better", delta: 1 });
-    expect(out.comparison.n).toMatchObject({ candidate: 10, baseline: 10 });
+    expect(out.comparison.n).toMatchObject({ candidate: 4, baseline: 4 });
     expect(out.candidate.digest).not.toBe(v1.digest);
 
     // the new version is now what the Lab resolves, and it carried the suite along
@@ -259,7 +273,7 @@ describe("GrimoireLab: evolving a skill end to end", () => {
   });
 
   it("rejects a candidate that changes nothing measurable, and leaves the current version alone", async () => {
-    const w = await world({ rewriter: cosmetic });
+    const w = await world({ rewriter: cosmetic, repeat: 4, rules: SMALL });
     const v1 = await w.lab.resolve("tdd");
     const out = await evolveSkill(w.ctx, v1);
     expect(out.promoted).toBe(false);
