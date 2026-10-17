@@ -14,7 +14,8 @@ The character mechanics borrow vocabulary only; all names and lore are original.
 | `@heartwood/core` | Append-only SQLite event log + projections, XP/level/rank rules, skill usage + proficiency, memory (FTS5, top-k injection, Markdown view, reflection), the `LabPort` and `WorkerBackend` ports with fakes, and the backend-agnostic `BackendCoordinator` |
 | `@heartwood/integrations` | `OrcaBackend`: the Orca adapter over `orca … --json` (execa, argv, no shell), with contract tests built from captured Orca output and an opt-in live smoke test |
 | `@heartwood/daemon` | Fastify daemon: composition root, REST commands, SSE event stream with `Last-Event-ID` resume, backend boot/degraded mode, restart resume |
-| grimoire-lab adapter, `cli`, `apps/web` | not started |
+| `@heartwood/web` (`apps/web`) | React + Vite + TanStack Query + Tailwind UI: overview, souls (skills, proficiency over time, memory view/editor), warbands and dispatch, town-wide skill usage, the Sovereign's inbox, live event feed |
+| grimoire-lab adapter, `cli` | not started (grimoire-lab's library API has landed; the adapter is unblocked) |
 
 ## Design notes
 
@@ -28,6 +29,18 @@ The character mechanics borrow vocabulary only; all names and lore are original.
 - **Foreman** is daemon logic; a member soul holds the role and earns a separate, capped bonus (never credited for decisions it didn't make).
 - **The Lab boundary** is `LabPort` in `@heartwood/core`; Heartwood owns rank thresholds and the promotion rule. Open grimoire-lab prerequisites: [#14](https://github.com/Senpawaii/grimoire-lab/issues/14) [#15](https://github.com/Senpawaii/grimoire-lab/issues/15) [#16](https://github.com/Senpawaii/grimoire-lab/issues/16) [#17](https://github.com/Senpawaii/grimoire-lab/issues/17) [#18](https://github.com/Senpawaii/grimoire-lab/issues/18).
 - **Windows:** spawn `orca.exe` (or `orca` resolving to it) with an argv array and no shell. `orca.cmd` shims fail with `EINVAL` without a shell.
+
+## Screenshots
+
+![Overview](docs/screenshots/overview.png)
+
+![A soul: skills, proficiency over time, usage, memory](docs/screenshots/soul.png)
+
+![A warband and its dispatches](docs/screenshots/warband.png)
+
+![Town-wide skill usage and ranks](docs/screenshots/skills.png)
+
+More: [souls](docs/screenshots/souls.png), [inbox](docs/screenshots/inbox.png).
 
 ## Running the daemon
 
@@ -54,7 +67,15 @@ If the backend cannot be opened or is incompatible, the daemon still starts in *
 - `GET /skills`, `GET /skills/usage|ranks`, `POST /souls/:id/skills` (absorb), `POST /skills/analyze|evolve`, `GET /souls/:id/skills/:skill/proficiency`
 - `GET|POST /warbands`, `GET /warbands/:id`, `POST /warbands/:id/dispatches|disband`, `POST /questions/:id/answer`, `POST /escalations/:id/resolve`
 
-Not wired yet: the scheduled reflection pass (needs an LLM-backed `Reflector`), CORS for the web UI.
+Also: `GET /town` (counts, budget) and `GET /inbox` (unanswered questions, unresolved escalations). Not wired yet: the scheduled reflection pass (needs an LLM-backed `Reflector`); the daemon does not serve the built UI (use the Vite dev server/proxy).
+
+## Running the web UI
+
+```
+pnpm --filter @heartwood/web dev        # http://localhost:5173, proxies /api to the daemon
+```
+
+`HEARTWOOD_DAEMON_URL` points the dev proxy elsewhere (default `http://127.0.0.1:7777`; the daemon's default port is 7777). If the daemon has a token, enter it under **Settings**. Every response is validated against the shared schemas in `@heartwood/protocol`, and the daemon has contract tests against the same schemas. Skill usage is labelled **injected, not verified** because it counts injected-and-settled tasks, not transcript-verified use.
 
 ## Develop
 

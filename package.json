@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -b && pnpm --filter @heartwood/web typecheck",
     "test": "vitest run",
     "lint": "biome check ."
   },

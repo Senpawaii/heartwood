@@ -4,9 +4,14 @@ import {
   getQuestion,
   getSoul,
   getWarband,
+  listOpenEscalations,
+  listOpenQuestions,
   listWarbands,
   NotFoundError,
   settleDispatch,
+  townBudget,
+  townCounts,
+  townName,
 } from "@heartwood/core";
 import type { FastifyInstance } from "fastify";
 import { ulid } from "ulid";
@@ -60,6 +65,29 @@ export function registerWarbandRoutes(app: FastifyInstance, d: DaemonContext): v
     if (s.status !== "active") throw new DomainError(`${s.name} is ${s.status}`);
     return s;
   };
+
+  /** Everything waiting on the Sovereign: unanswered worker questions and unresolved escalations. */
+  app.get("/inbox", async () => ({
+    questions: listOpenQuestions(ctx.db),
+    escalations: listOpenEscalations(ctx.db),
+  }));
+
+  app.get("/town", async () => {
+    const c = townCounts(ctx.db);
+    return {
+      name: townName(ctx.db),
+      budget: townBudget(ctx.db) ?? null,
+      magiculesSpent: c.magiculesSpent,
+      counts: {
+        souls: c.souls,
+        ministries: c.ministries,
+        warbands: c.warbands,
+        activeWarbands: c.activeWarbands,
+        openQuestions: listOpenQuestions(ctx.db).length,
+        openEscalations: listOpenEscalations(ctx.db).length,
+      },
+    };
+  });
 
   app.get("/warbands", async () => ({ warbands: listWarbands(ctx.db) }));
 

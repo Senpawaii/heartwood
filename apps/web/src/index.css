@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-bark-50: #faf6f1;
+  --color-bark-100: #f0e7da;
+  --color-bark-200: #e0cdb4;
+  --color-bark-300: #c9aa83;
+  --color-bark-500: #8a6a43;
+  --color-bark-700: #5b4429;
+  --color-bark-800: #3f2f1d;
+  --color-bark-900: #2a1f13;
+  --color-leaf-100: #dcefd7;
+  --color-leaf-500: #4f8a3c;
+  --color-leaf-700: #2f5a23;
+  --color-heart-500: #b8532f;
+}
+
+body {
+  @apply bg-bark-50 text-bark-900 antialiased;
+}

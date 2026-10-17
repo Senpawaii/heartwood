@@ -308,3 +308,77 @@ export function getQuestion(
     .get(questionId);
   return { questionId, groupRef, messageId: p.messageId, text: p.text, answered };
 }
+
+export interface OpenQuestionRow {
+  questionId: string;
+  text: string;
+  dispatchId: string | null;
+  soulId: string | null;
+  at: string;
+}
+
+export interface OpenEscalationRow {
+  escalationId: string;
+  level: string;
+  reason: string;
+  dispatchId: string | null;
+  soulId: string | null;
+  at: string;
+}
+
+/** Questions workers asked that nobody has answered yet, oldest first. */
+export function listOpenQuestions(db: Db): OpenQuestionRow[] {
+  return db
+    .prepare(
+      `SELECT json_extract(e.payload, '$.questionId') AS questionId, json_extract(e.payload, '$.text') AS text,
+              json_extract(e.payload, '$.dispatchId') AS dispatchId, json_extract(e.correlation, '$.soulId') AS soulId, e.at AS at
+       FROM events e WHERE e.type = 'question.asked' AND NOT EXISTS (
+         SELECT 1 FROM events a WHERE a.type = 'question.answered'
+           AND json_extract(a.payload, '$.questionId') = json_extract(e.payload, '$.questionId'))
+       ORDER BY e.seq`,
+    )
+    .all() as OpenQuestionRow[];
+}
+
+/** Escalations nobody has resolved yet, oldest first. */
+export function listOpenEscalations(db: Db): OpenEscalationRow[] {
+  return db
+    .prepare(
+      `SELECT json_extract(e.payload, '$.escalationId') AS escalationId, json_extract(e.payload, '$.level') AS level,
+              json_extract(e.payload, '$.reason') AS reason, json_extract(e.payload, '$.dispatchId') AS dispatchId,
+              json_extract(e.correlation, '$.soulId') AS soulId, e.at AS at
+       FROM events e WHERE e.type = 'escalation.raised' AND NOT EXISTS (
+         SELECT 1 FROM events r WHERE r.type = 'escalation.resolved'
+           AND json_extract(r.payload, '$.escalationId') = json_extract(e.payload, '$.escalationId'))
+       ORDER BY e.seq`,
+    )
+    .all() as OpenEscalationRow[];
+}
+
+export interface TownCounts {
+  souls: number;
+  ministries: number;
+  warbands: number;
+  activeWarbands: number;
+  magiculesSpent: number;
+}
+
+export function townCounts(db: Db): TownCounts {
+  const row = db
+    .prepare(
+      `SELECT (SELECT COUNT(*) FROM souls) AS souls, (SELECT COUNT(*) FROM ministries) AS ministries,
+              (SELECT COUNT(*) FROM warbands) AS warbands, (SELECT COUNT(*) FROM warbands WHERE status = 'active') AS activeWarbands,
+              (SELECT COALESCE(SUM(magicules_spent), 0) FROM souls) AS magiculesSpent`,
+    )
+    .get() as TownCounts;
+  return row;
+}
+
+export function townName(db: Db): string {
+  const row = db
+    .prepare(
+      "SELECT json_extract(payload, '$.name') AS name FROM events WHERE type = 'town.founded' ORDER BY seq LIMIT 1",
+    )
+    .get() as { name: string } | undefined;
+  return row?.name ?? "Heartwood";
+}
