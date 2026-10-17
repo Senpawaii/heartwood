@@ -8,6 +8,7 @@ import {
   listOpenQuestions,
   listWarbands,
   NotFoundError,
+  type StartedWorker,
   settleDispatch,
   townBudget,
   townCounts,
@@ -165,7 +166,7 @@ export function registerWarbandRoutes(app: FastifyInstance, d: DaemonContext): v
       brief: b.brief,
       k: b.k,
     });
-    let worker: Awaited<ReturnType<typeof backend.startWorker>>;
+    let worker: StartedWorker;
     try {
       worker = await backend.startWorker(wb.groupRef, {
         spec: dispatch.spec,

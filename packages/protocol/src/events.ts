@@ -208,7 +208,17 @@ export const payloadSchemas = {
   // skills
   "skill.absorbed": z.object({ soulId: Id, skill: PinnedSkill, source: z.string() }),
   "skill.forgotten": z.object({ soulId: Id, name: z.string() }),
-  "skill.analyzed": z.object({ skill: PinnedSkill, resultRef: z.string(), score: z.number() }),
+  "skill.analyzed": z.object({
+    skill: PinnedSkill,
+    resultRef: z.string(),
+    /** Pass rate over all trials. */
+    score: z.number(),
+    trials: z.number().int().nonnegative(),
+    /** Trials that could not measure the skill (infra errors). */
+    errors: z.number().int().nonnegative(),
+    /** False when the sample was too small or too error-ridden to rank; the rank is then left unchanged. */
+    conclusive: z.boolean(),
+  }),
   "skill.ranked": z.object({
     skill: PinnedSkill,
     rank: SkillRank,

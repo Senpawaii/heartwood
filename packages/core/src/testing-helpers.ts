@@ -1,9 +1,9 @@
 import { settleDispatch } from "./dispatch.js";
-import type { makeTown } from "./testing.js";
+import type { Town } from "./testing.js";
 
 /** Create a one-soul warband, run a dispatch to the given outcome, return the dispatch.settled event id. */
 export async function dispatchSettled(
-  t: ReturnType<typeof makeTown>,
+  t: Town,
   soulId: string,
   outcome: "succeeded" | "failed",
 ): Promise<string> {

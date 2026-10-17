@@ -466,7 +466,7 @@ describe("skills and Lab", () => {
         digest: ref.digest,
         rank: "unique",
         score: 0.8,
-        thresholdsVersion: "default-1",
+        thresholdsVersion: "default-2",
       },
     ]);
     expect((await json(b.app, "GET", `/souls/${t.worker}`)).body.skills[0]).toMatchObject({

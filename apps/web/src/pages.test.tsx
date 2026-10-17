@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
 import { App } from "./App";
-import { createClient } from "./api/client";
+import { type Client, createClient } from "./api/client";
 import { AppProviders } from "./api/provider";
 import { SkillUsageTable } from "./components/SkillUsageTable";
 
@@ -11,8 +11,13 @@ afterEach(cleanup);
 
 type Routes = Record<string, unknown | ((req: { method: string; body: string | null }) => unknown)>;
 
+interface FakeDaemon {
+  calls: { method: string; path: string; body: string | null }[];
+  client: Client;
+}
+
 /** A daemon stand-in: routes keyed by "METHOD /path" (query ignored). Unrouted calls fail the test. */
-function fakeDaemon(routes: Routes) {
+function fakeDaemon(routes: Routes): FakeDaemon {
   const calls: { method: string; path: string; body: string | null }[] = [];
   const fetchFn = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
@@ -72,7 +77,7 @@ const ready = {
 };
 const inbox = { questions: [], escalations: [] };
 
-function mount(d: ReturnType<typeof fakeDaemon>, path: string) {
+function mount(d: FakeDaemon, path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <AppProviders client={d.client} live={false}>

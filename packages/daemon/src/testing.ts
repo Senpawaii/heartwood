@@ -21,13 +21,7 @@ export interface Booted {
 }
 
 export async function boot(
-  o: {
-    backend?: WorkerBackend;
-    lab?: LabPort;
-    token?: string;
-    maxGroups?: number;
-    db?: ReturnType<typeof openDb>;
-  } = {},
+  o: { backend?: WorkerBackend; lab?: LabPort; token?: string; maxGroups?: number; db?: Db } = {},
 ): Promise<Booted> {
   const db: Db = o.db ?? openDb();
   const backend = (o.backend ?? new FakeBackend()) as FakeBackend;

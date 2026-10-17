@@ -1,7 +1,8 @@
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { openDb, SqliteKv, UnavailableLab } from "@heartwood/core";
-import { OrcaBackend } from "@heartwood/integrations";
+import { dirSource, ResultStore } from "@grimoire/core";
+import { openDb, SqliteKv } from "@heartwood/core";
+import { GrimoireLab, OrcaBackend, SkillStore } from "@heartwood/integrations";
 import { loadConfig } from "./config.js";
 import { createDaemon } from "./daemon.js";
 
@@ -9,6 +10,17 @@ const config = loadConfig();
 const dataDir = resolve(config.dataDir);
 mkdirSync(dataDir, { recursive: true });
 const db = openDb(join(dataDir, "heartwood.db"));
+
+mkdirSync(join(dataDir, "grimoire"), { recursive: true });
+const results = new ResultStore(join(dataDir, "grimoire", "results.db"));
+// Catalog reads, pinning and rendering work as is. Benchmarks need an AgentAdapter and version proposals
+// need a rewriter; neither is configured here, so those operations answer 501 instead of faking results.
+const lab = new GrimoireLab({
+  sources: config.lab.skillDirs.map((d) => dirSource(resolve(d))),
+  store: new SkillStore(join(dataDir, "skills")),
+  results,
+  outDir: join(dataDir, "grimoire", "runs"),
+});
 
 const daemon = await createDaemon({
   db,
@@ -21,8 +33,7 @@ const daemon = await createDaemon({
     pollTimeoutMs: config.orca.pollTimeoutMs,
     identity: new SqliteKv(db, "orca"),
   }),
-  // Until the grimoire-lab adapter exists, Lab operations fail loudly instead of being stubbed.
-  lab: new UnavailableLab("grimoire-lab adapter is not implemented yet"),
+  lab,
   coordinator: { maxConcurrentGroups: config.maxConcurrentGroups },
 });
 
@@ -42,6 +53,8 @@ const shutdown = async (signal: string) => {
   stopping = true;
   daemon.app.log.info({ signal }, "shutting down");
   await daemon.close();
+  await lab.close();
+  results.close();
   db.close();
   process.exit(0);
 };

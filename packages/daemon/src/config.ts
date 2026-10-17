@@ -1,3 +1,4 @@
+import { delimiter } from "node:path";
 import { z } from "zod";
 
 export const ConfigSchema = z.object({
@@ -9,6 +10,15 @@ export const ConfigSchema = z.object({
   token: z.string().min(16).optional(),
   maxConcurrentGroups: z.coerce.number().int().positive().default(4),
   logLevel: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+  lab: z
+    .object({
+      /** Catalog directories of skill folders, searched in order. */
+      skillDirs: z
+        .string()
+        .optional()
+        .transform((s) => (s ? s.split(delimiter).filter(Boolean) : ["grimoire/skills"])),
+    })
+    .default({ skillDirs: ["grimoire/skills"] }),
   orca: z
     .object({
       bin: z.string().optional(),
@@ -29,6 +39,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     token: env.HEARTWOOD_TOKEN,
     maxConcurrentGroups: env.HEARTWOOD_MAX_GROUPS,
     logLevel: env.HEARTWOOD_LOG_LEVEL,
+    lab: { skillDirs: env.HEARTWOOD_SKILL_DIRS },
     orca: {
       bin: env.HEARTWOOD_ORCA_BIN,
       coordinatorWorktree: env.HEARTWOOD_ORCA_COORDINATOR_WORKTREE,

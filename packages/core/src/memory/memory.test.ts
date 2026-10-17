@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { makeTown } from "../testing.js";
+import { makeTown, type Town } from "../testing.js";
 import { markdownEdits, renderSoulMarkdown } from "./markdown.js";
 import { runReflection } from "./reflection.js";
 import { getMemory, listMemories, retrieveMemories, toFtsQuery } from "./store.js";
 
 function write(
-  t: ReturnType<typeof makeTown>,
+  t: Town,
   id: string,
   soul: string,
   text: string,

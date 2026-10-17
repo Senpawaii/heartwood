@@ -12,10 +12,10 @@ The character mechanics borrow vocabulary only; all names and lore are original.
 |---|---|
 | `@heartwood/protocol` | Zod event schemas (town, soul, body, warband, dispatch, backend, memory, skill) and domain enums |
 | `@heartwood/core` | Append-only SQLite event log + projections, XP/level/rank rules, skill usage + proficiency, memory (FTS5, top-k injection, Markdown view, reflection), the `LabPort` and `WorkerBackend` ports with fakes, and the backend-agnostic `BackendCoordinator` |
-| `@heartwood/integrations` | `OrcaBackend`: the Orca adapter over `orca … --json` (execa, argv, no shell), with contract tests built from captured Orca output and an opt-in live smoke test |
+| `@heartwood/integrations` | `OrcaBackend`: the Orca adapter over `orca … --json` (execa, argv, no shell), with contract tests built from captured Orca output and an opt-in live smoke test. `GrimoireLab`: the Lab over [`@grimoire/core`](https://github.com/Senpawaii/grimoire-lab) v0.1.0 as a library, tested against the real library |
 | `@heartwood/daemon` | Fastify daemon: composition root, REST commands, SSE event stream with `Last-Event-ID` resume, backend boot/degraded mode, restart resume |
 | `@heartwood/web` (`apps/web`) | React + Vite + TanStack Query + Tailwind UI: overview, souls (skills, proficiency over time, memory view/editor), warbands and dispatch, town-wide skill usage, the Sovereign's inbox, live event feed |
-| grimoire-lab adapter, `cli` | not started (grimoire-lab's library API has landed; the adapter is unblocked) |
+| `cli` | not started |
 
 ## Design notes
 
@@ -24,6 +24,7 @@ The character mechanics borrow vocabulary only; all names and lore are original.
 - **Heartbeats are not events.** The coordinator drops them at translation and keeps only the last heartbeat time.
 - **Orca is an adapter, not the architecture.** The daemon, coordinator and domain depend only on the `WorkerBackend` port (`@heartwood/core`): groups, tasks, workers, a polled mailbox with batch-token acks, neutral message kinds (`done`, `escalation`, `question`, `heartbeat`, `rejected`, `other`). Events are `backend.*` and carry opaque refs. Everything vendor-specific lives in `OrcaBackend`; swapping Orca means writing another adapter.
 - **Orca facts (verified against Orca 1.4.200), all contained in `OrcaBackend`.** Workers are addressed by Dispatch id (`ctx_…`). `check` returns a whole FIFO *delivery*, replayed until its id is passed as `--ack` on the **next** `check`. Refused lifecycle messages arrive as ordinary messages carrying `_orcaLifecycleRejection`; the adapter maps them to kind `rejected` and they never settle anything. A `worker-start` receipt of `outcome_unknown` means the first turn was not observed, not that it failed. Mutating commands need a sender terminal (`--from`), and Orca binds a terminal to its **most recent Run**, so the adapter provisions one idle coordinator terminal **per group** (`terminal create`), remembers it in the `KeyValueStore` it is given, names it as `--terminal` on every `check` (otherwise a daemon started inside an Orca terminal gets `consumer_fenced`), and closes it in `closeGroup`. The daemon needs no terminal of its own.
+- **The Lab is grimoire-lab, as a library, and it only measures.** `GrimoireLab` maps `@grimoire/core` results to `Evidence`; Heartwood owns the policy. A rank comes from `deriveSkillRank` (configurable in `Rules.skillRank`): pass rate over *countable* trials plus lift over a no-skill baseline, and a benchmark with too few trials or too many infra errors is **inconclusive** (recorded as `skill.analyzed` with `conclusive: false`, rank left unchanged). A new skill version is promoted only if its comparison clears `Rules.promotion` (minimum countable trials per side and a minimum delta) **and** says "better"; grimoire's own gate defaults are not used for promotion. Pins are copied into Heartwood's content-addressed `SkillStore` on absorb, so a soul's skill survives the catalog changing; a promoted version supersedes the catalog copy for new absorbs.
 - **Backends are pull-based.** `BackendCoordinator` is the sole mailbox consumer per group: translate, commit, *then* carry the batch token forward as the ack. Replays are idempotent via a unique `(type, messageId)` index. A missing `done` never proves death; only `liveness: exited` does.
 - **Skill usage** is recorded with `evidence: "injected" | "loaded"`. Today only `injected` (skill was in the spec and the dispatch settled) is produced, which can overcount; the UI must label it.
 - **Foreman** is daemon logic; a member soul holds the role and earns a separate, capped bonus (never credited for decisions it didn't make).
@@ -53,10 +54,11 @@ pnpm --filter @heartwood/daemon start
 | `HEARTWOOD_DATA_DIR` | `.heartwood` | SQLite database (event log, projections, adapter state) |
 | `HEARTWOOD_HOST` / `HEARTWOOD_PORT` | `127.0.0.1` / `7777` | |
 | `HEARTWOOD_TOKEN` | unset | Bearer token (≥16 chars) required on everything except `/health`; SSE also accepts `?token=`. Set it before listening off loopback. |
+| `HEARTWOOD_SKILL_DIRS` | `grimoire/skills` | Skill catalog directories (path-delimiter separated), read-only |
 | `HEARTWOOD_MAX_GROUPS` | `4` | Concurrent warbands watched (one long poll each) |
 | `HEARTWOOD_ORCA_BIN`, `HEARTWOOD_ORCA_COORDINATOR_WORKTREE`, `HEARTWOOD_ORCA_POLL_TIMEOUT_MS` | `orca`, `active`, `60000` | Orca adapter |
 
-If the backend cannot be opened or is incompatible, the daemon still starts in **degraded** mode (`backend.incompatible` is recorded, backend routes return 503); `POST /backend/connect` retries. Lab operations return **501** until the grimoire-lab adapter exists.
+If the backend cannot be opened or is incompatible, the daemon still starts in **degraded** mode (`backend.incompatible` is recorded, backend routes return 503); `POST /backend/connect` retries. Catalog, absorb (pin) and spec rendering work out of the box. **Benchmarks (analyze, compare) need an `AgentAdapter` and version proposals need a `SkillRewriter`; neither is configured by default, so `/skills/analyze` and `/skills/evolve` return 501** rather than fabricate results. `@grimoire/adapters` is not published yet; the intended adapter is an Orca-backed one.
 
 **API** (JSON; errors are `{error, message}` with 400 invalid, 404 unknown, 409 rule violated, 429 group cap, 501 Lab unavailable, 502 backend failure, 503 backend down):
 

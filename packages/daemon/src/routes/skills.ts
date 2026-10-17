@@ -12,8 +12,6 @@ import { z } from "zod";
 import type { DaemonContext } from "../daemon.js";
 
 const Absorb = z.object({ name: z.string().min(1) });
-const Suite = z.object({ suite: z.object({ name: z.string().min(1) }).optional() });
-const AnalyzeBody = PinnedSkill.extend(Suite.shape);
 
 export function registerSkillRoutes(app: FastifyInstance, d: DaemonContext): void {
   const { ctx } = d;
@@ -43,15 +41,16 @@ export function registerSkillRoutes(app: FastifyInstance, d: DaemonContext): voi
 
   /** Analyze: benchmark a skill and derive its rank. */
   app.post("/skills/analyze", async (req) => {
-    const b = AnalyzeBody.parse(req.body);
-    const result = await analyzeSkill(ctx, { name: b.name, digest: b.digest }, b.suite);
-    return { result };
+    const b = PinnedSkill.parse(req.body);
+    const { evidence, rank } = await analyzeSkill(ctx, { name: b.name, digest: b.digest });
+    // rank is absent when the benchmark was inconclusive (too few trials / too many infra errors)
+    return { evidence, rank: rank ?? null };
   });
 
   /** Evolve: propose a new version and promote it only on proof from a comparison. */
   app.post("/skills/evolve", async (req) => {
-    const b = AnalyzeBody.parse(req.body);
-    const out = await evolveSkill(ctx, { name: b.name, digest: b.digest }, b.suite);
-    return { promoted: out.promoted, candidate: out.candidate };
+    const b = PinnedSkill.parse(req.body);
+    const out = await evolveSkill(ctx, { name: b.name, digest: b.digest });
+    return { promoted: out.promoted, candidate: out.candidate, comparison: out.comparison };
   });
 }

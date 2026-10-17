@@ -1,7 +1,7 @@
 import type { EventPayloads, EventType, Species } from "@heartwood/protocol";
 import type { LabCtx } from "./context.js";
-import { openDb } from "./db.js";
-import { createDispatch, type TaskBrief } from "./dispatch.js";
+import { type Db, openDb } from "./db.js";
+import { type CreatedDispatch, createDispatch, type TaskBrief } from "./dispatch.js";
 import { type EventLog, SqliteEventLog } from "./eventLog.js";
 import { FakeLab } from "./fakeLab.js";
 import { nameSoul } from "./progression.js";
@@ -15,8 +15,29 @@ export const brief = (target = "the parser"): TaskBrief => ({
   acceptance: "tests pass",
 });
 
-/** Test helper: an in-memory town with a fake Lab. */
-export function makeTown(rules: Rules = defaultRules) {
+/** An in-memory town with a fake Lab, for tests. Satisfies `LabCtx`, so it can be passed to the services directly. */
+export interface Town {
+  db: Db;
+  log: EventLog;
+  rules: Rules;
+  lab: FakeLab;
+  ctx: LabCtx;
+  addSoul(name: string, species?: Species): string;
+  formWarband(
+    foreman: string,
+    members?: string[],
+    groupRef?: string,
+  ): { warbandId: string; groupRef: string };
+  /** Create a dispatch and start a worker body for it. */
+  dispatch(
+    warbandId: string,
+    soulId: string,
+    workerId: string,
+    b?: TaskBrief,
+  ): Promise<CreatedDispatch & { bodyId: string }>;
+}
+
+export function makeTown(rules: Rules = defaultRules): Town {
   const db = openDb();
   const log = new SqliteEventLog(db, { rules });
   const lab = new FakeLab();

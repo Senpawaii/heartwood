@@ -1,7 +1,7 @@
 import { BackendError, MemoryKv, WorkerStartError } from "@heartwood/core";
 import { describe, expect, it } from "vitest";
 import { OrcaBackend } from "./orcaBackend.js";
-import type { OrcaRunner } from "./runner.js";
+import type { OrcaRunner, RunResult } from "./runner.js";
 
 const ok = (result: unknown) => ({
   exitCode: 0,
@@ -20,7 +20,7 @@ const fail = (code: string, message: string, exitCode = 1, result?: unknown) => 
 });
 
 /** Records argv and replies from a queue. */
-function scripted(...replies: ReturnType<typeof ok>[]) {
+function scripted(...replies: RunResult[]) {
   const calls: string[][] = [];
   const runner: OrcaRunner = async (argv) => {
     calls.push([...argv]);

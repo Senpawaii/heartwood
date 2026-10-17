@@ -8,10 +8,10 @@ import {
   skillUsageForSoul,
   townSkillUsage,
 } from "./queries.js";
-import { brief, makeTown } from "./testing.js";
+import { brief, makeTown, type Town } from "./testing.js";
 
 function remember(
-  t: ReturnType<typeof makeTown>,
+  t: Town,
   soulId: string | null,
   text: string,
   layer: "episodic" | "town" = "episodic",
