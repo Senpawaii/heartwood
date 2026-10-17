@@ -9,6 +9,9 @@
     },
     {
       "path": "packages/integrations"
+    },
+    {
+      "path": "packages/daemon"
     }
   ]
 }

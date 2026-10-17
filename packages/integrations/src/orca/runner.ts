@@ -51,17 +51,31 @@ export function execaRunner(bin = "orca", env?: Record<string, string | undefine
   let resolved: string | undefined;
   return async (argv, opts = {}) => {
     resolved ??= resolveBinary(bin);
-    const r = await execa(resolved, [...argv], {
+    const sub = execa(resolved, [...argv], {
       reject: false,
       shell: false,
       stdin: "ignore",
       windowsHide: true,
-      cancelSignal: opts.signal,
       timeout: opts.timeoutMs,
       env,
       extendEnv: true,
     });
-    if (r.isCanceled) return { exitCode: 130, stdout: "", stderr: "cancelled" };
+    const { signal } = opts;
+    if (signal) {
+      // Abort must return at once. Waiting for the process would also wait for its stdio pipes, which a
+      // wrapper's child can hold open until a long poll's own timeout (observed: ~60s on Windows).
+      const aborted = new Promise<"aborted">((resolve) => {
+        if (signal.aborted) resolve("aborted");
+        else signal.addEventListener("abort", () => resolve("aborted"), { once: true });
+      });
+      const winner = await Promise.race([sub, aborted]);
+      if (winner === "aborted") {
+        sub.kill();
+        sub.then(undefined, () => undefined); // the orphaned process ends on its own; ignore its result
+        return { exitCode: 130, stdout: "", stderr: "cancelled" };
+      }
+    }
+    const r = await sub;
     if (r.timedOut) throw new BackendError(`orca timed out after ${opts.timeoutMs}ms`, "timeout");
     return {
       exitCode: r.exitCode ?? 1,

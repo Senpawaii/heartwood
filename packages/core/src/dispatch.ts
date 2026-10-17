@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { NewEvent, PinnedSkill } from "@heartwood/protocol";
 import { ulid } from "ulid";
 import type { Ctx, LabCtx } from "./context.js";
+import { NotFoundError } from "./errors.js";
 import { episodicEvent, personaFor, retrieveMemories, type ScoredMemory } from "./memory/store.js";
 import { grantXp } from "./progression.js";
 import { getDispatch } from "./queries.js";
@@ -117,7 +118,7 @@ export function settleDispatch(
 ): boolean {
   return ctx.log.transaction(() => {
     const d = getDispatch(ctx.db, o.dispatchId);
-    if (!d) throw new Error(`unknown dispatch: ${o.dispatchId}`);
+    if (!d) throw new NotFoundError(`unknown dispatch: ${o.dispatchId}`);
     if (d.state === "settled") return false;
     const correlation = { warbandId: d.warbandId, soulId: d.soulId, dispatchId: d.dispatchId };
     const usageOutcome = o.outcome === "abandoned" ? "unknown" : o.outcome;
@@ -181,13 +182,12 @@ function awardForemanBonus(
     .prepare("SELECT foreman_soul_id AS f FROM warbands WHERE warband_id = ?")
     .get(warbandId) as { f: string } | undefined;
   if (!wb || wb.f === workerSoulId) return;
-  const given = (
-    ctx.db
-      .prepare(
-        "SELECT COALESCE(SUM(amount), 0) AS s FROM xp_ledger WHERE warband_id = ? AND reason = 'foreman_bonus'",
-      )
-      .get(warbandId) as { s: number }
-  ).s;
+  const bonusRow = ctx.db
+    .prepare(
+      "SELECT COALESCE(SUM(amount), 0) AS s FROM xp_ledger WHERE warband_id = ? AND reason = 'foreman_bonus'",
+    )
+    .get(warbandId) as { s: number };
+  const given = bonusRow.s;
   const amount = Math.min(
     ctx.rules.xp.foremanPerSuccess,
     ctx.rules.xp.foremanCapPerWarband - given,

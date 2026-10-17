@@ -13,7 +13,8 @@ The character mechanics borrow vocabulary only; all names and lore are original.
 | `@heartwood/protocol` | Zod event schemas (town, soul, body, warband, dispatch, backend, memory, skill) and domain enums |
 | `@heartwood/core` | Append-only SQLite event log + projections, XP/level/rank rules, skill usage + proficiency, memory (FTS5, top-k injection, Markdown view, reflection), the `LabPort` and `WorkerBackend` ports with fakes, and the backend-agnostic `BackendCoordinator` |
 | `@heartwood/integrations` | `OrcaBackend`: the Orca adapter over `orca … --json` (execa, argv, no shell), with contract tests built from captured Orca output and an opt-in live smoke test |
-| `daemon`, grimoire-lab adapter, `cli`, `apps/web` | not started |
+| `@heartwood/daemon` | Fastify daemon: composition root, REST commands, SSE event stream with `Last-Event-ID` resume, backend boot/degraded mode, restart resume |
+| grimoire-lab adapter, `cli`, `apps/web` | not started |
 
 ## Design notes
 
@@ -27,6 +28,33 @@ The character mechanics borrow vocabulary only; all names and lore are original.
 - **Foreman** is daemon logic; a member soul holds the role and earns a separate, capped bonus (never credited for decisions it didn't make).
 - **The Lab boundary** is `LabPort` in `@heartwood/core`; Heartwood owns rank thresholds and the promotion rule. Open grimoire-lab prerequisites: [#14](https://github.com/Senpawaii/grimoire-lab/issues/14) [#15](https://github.com/Senpawaii/grimoire-lab/issues/15) [#16](https://github.com/Senpawaii/grimoire-lab/issues/16) [#17](https://github.com/Senpawaii/grimoire-lab/issues/17) [#18](https://github.com/Senpawaii/grimoire-lab/issues/18).
 - **Windows:** spawn `orca.exe` (or `orca` resolving to it) with an argv array and no shell. `orca.cmd` shims fail with `EINVAL` without a shell.
+
+## Running the daemon
+
+```
+pnpm --filter @heartwood/daemon start
+```
+
+| Variable | Default | |
+|---|---|---|
+| `HEARTWOOD_DATA_DIR` | `.heartwood` | SQLite database (event log, projections, adapter state) |
+| `HEARTWOOD_HOST` / `HEARTWOOD_PORT` | `127.0.0.1` / `7777` | |
+| `HEARTWOOD_TOKEN` | unset | Bearer token (≥16 chars) required on everything except `/health`; SSE also accepts `?token=`. Set it before listening off loopback. |
+| `HEARTWOOD_MAX_GROUPS` | `4` | Concurrent warbands watched (one long poll each) |
+| `HEARTWOOD_ORCA_BIN`, `HEARTWOOD_ORCA_COORDINATOR_WORKTREE`, `HEARTWOOD_ORCA_POLL_TIMEOUT_MS` | `orca`, `active`, `60000` | Orca adapter |
+
+If the backend cannot be opened or is incompatible, the daemon still starts in **degraded** mode (`backend.incompatible` is recorded, backend routes return 503); `POST /backend/connect` retries. Lab operations return **501** until the grimoire-lab adapter exists.
+
+**API** (JSON; errors are `{error, message}` with 400 invalid, 404 unknown, 409 rule violated, 429 group cap, 501 Lab unavailable, 502 backend failure, 503 backend down):
+
+- `GET /health`, `POST /backend/connect`
+- `GET /events?afterSeq&types&limit`, `GET /events/stream?lastEventId&types` (SSE; `id` = event seq, resumes from `Last-Event-ID`)
+- `GET|POST /ministries`, `GET|POST /souls`, `GET /souls/:id`, `POST /souls/:id/evolve|awaken`
+- `GET /souls/:id/memory`, `GET|PUT /souls/:id/memory.md` (editable view), `POST /memories/:id/prune|promote`, `GET /town/memory`
+- `GET /skills`, `GET /skills/usage|ranks`, `POST /souls/:id/skills` (absorb), `POST /skills/analyze|evolve`, `GET /souls/:id/skills/:skill/proficiency`
+- `GET|POST /warbands`, `GET /warbands/:id`, `POST /warbands/:id/dispatches|disband`, `POST /questions/:id/answer`, `POST /escalations/:id/resolve`
+
+Not wired yet: the scheduled reflection pass (needs an LLM-backed `Reflector`), CORS for the web UI.
 
 ## Develop
 

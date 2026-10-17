@@ -148,5 +148,7 @@ export interface WorkerBackend {
   stopWorker(workerRef: string): Promise<void>;
   /** Fence a worker without claiming its process stopped (safe when liveness is unverifiable). */
   abandonWorker(workerRef: string): Promise<void>;
+  /** Answer a worker's question (the `messageId` of a `question` message). */
+  reply(groupRef: string, messageId: string, text: string): Promise<void>;
   poll(groupRef: string, opts: PollOptions): Promise<PollBatch>;
 }

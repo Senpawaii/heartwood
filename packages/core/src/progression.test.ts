@@ -4,6 +4,10 @@ import { getSoul } from "./queries.js";
 import { makeTown } from "./testing.js";
 import { dispatchSettled } from "./testing-helpers.js";
 
+function columnName(row: unknown): string {
+  return typeof row === "object" && row !== null && "name" in row ? String(row.name) : "";
+}
+
 describe("progression", () => {
   it("emits leveled and ranked only when thresholds are crossed; rank is derived", () => {
     const t = makeTown();
@@ -24,7 +28,7 @@ describe("progression", () => {
       t.db
         .prepare("PRAGMA table_info(souls)")
         .all()
-        .map((c) => (c as { name: string }).name),
+        .map((c) => columnName(c)),
     ).not.toContain("rank");
   });
 

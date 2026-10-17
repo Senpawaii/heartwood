@@ -1,5 +1,6 @@
 import type { HeartwoodEvent, PinnedSkill } from "@heartwood/protocol";
 import type { LabCtx } from "./context.js";
+import { DomainError } from "./errors.js";
 import { type BenchResult, benchRef, type SkillSource, type SuiteRef } from "./lab.js";
 import { skillRankForScore } from "./rules.js";
 
@@ -11,7 +12,7 @@ export async function absorbSkill(
   const ref = await ctx.lab.resolve(o.name, o.source);
   const pin = { name: ref.name, digest: ref.digest };
   if (!(await ctx.lab.verifyPin(pin)))
-    throw new Error(`cannot verify pin ${pin.name}@${pin.digest}`);
+    throw new DomainError(`cannot verify pin ${pin.name}@${pin.digest}`);
   ctx.log.append([
     {
       type: "skill.absorbed",

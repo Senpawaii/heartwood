@@ -1,3 +1,4 @@
+import { ulid } from "ulid";
 import type { Ctx } from "../context.js";
 import { settleDispatch } from "../dispatch.js";
 import { getBody, getBodyByWorkerRef, getDispatch } from "../queries.js";
@@ -5,6 +6,7 @@ import {
   type BackendMessage,
   type Disposition,
   type SettleResult,
+  type StartedWorker,
   WAKE_KINDS,
   type WorkerBackend,
 } from "./backend.js";
@@ -105,6 +107,69 @@ export class BackendCoordinator {
       ]);
       return false;
     }
+  }
+
+  /**
+   * Record a freshly started worker as the body of a dispatch. A fast worker can report `done`
+   * before this runs (starting can take a while); that completion was recorded but could not be
+   * settled because no body existed yet, so it is adopted here, in the same transaction.
+   */
+  async registerWorker(o: {
+    groupRef: string;
+    soulId: string;
+    dispatchId: string;
+    worker: StartedWorker;
+    agent: string;
+    model?: string;
+    placement: string;
+  }): Promise<{ bodyId: string; settledEarly: boolean }> {
+    const bodyId = `body_${ulid()}`;
+    const correlation = { groupRef: o.groupRef, soulId: o.soulId, dispatchId: o.dispatchId };
+    let settledEarly = false;
+    this.ctx.log.transaction(() => {
+      this.ctx.log.append([
+        {
+          type: "body.spawned",
+          payload: {
+            bodyId,
+            soulId: o.soulId,
+            dispatchId: o.dispatchId,
+            workerRef: o.worker.workerRef,
+            workerLocator: o.worker.locator,
+            agent: o.agent,
+            model: o.model,
+            worktree: o.placement,
+          },
+          actor: { kind: "daemon" },
+          correlation,
+        },
+        {
+          type: "dispatch.started",
+          payload: { dispatchId: o.dispatchId, bodyId },
+          actor: { kind: "daemon" },
+          correlation,
+        },
+      ]);
+      const early = this.ctx.db
+        .prepare(
+          "SELECT id, payload FROM events WHERE type = 'backend.worker_done' AND json_extract(payload, '$.workerRef') = ? ORDER BY seq LIMIT 1",
+        )
+        .get(o.worker.workerRef) as { id: string; payload: string } | undefined;
+      if (early) {
+        const p = JSON.parse(early.payload) as {
+          outcome: "succeeded" | "failed";
+          summary?: string;
+        };
+        settledEarly = settleDispatch(this.ctx, {
+          dispatchId: o.dispatchId,
+          outcome: p.outcome,
+          summary: p.summary,
+          causedBy: early.id,
+        });
+      }
+    });
+    if (settledEarly) await this.applyDisposition(o.groupRef, bodyId);
+    return { bodyId, settledEarly };
   }
 
   /** Acknowledge the last committed batch without waiting (used on stop). Best effort. */
@@ -333,6 +398,11 @@ export class BackendCoordinator {
 
   async stopAll(): Promise<void> {
     await Promise.all([...this.watches.keys()].map((g) => this.stop(g)));
+  }
+
+  /** Whether another group can be watched without exceeding the cap. */
+  get hasCapacity(): boolean {
+    return this.watches.size < this.max;
   }
 
   get watching(): string[] {

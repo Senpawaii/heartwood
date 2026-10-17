@@ -99,7 +99,13 @@ describe("markdown view", () => {
       .replace("first lesson", "first lesson, corrected")
       .replace(/<!-- memory:m3 -->\nthird lesson\n?/, "");
     const events = markdownEdits(t.db, a, edited);
-    expect(events.map((e) => [e.type, (e.payload as { memoryId: string }).memoryId])).toEqual([
+    expect(
+      events.map((e) =>
+        e.type === "memory.edited" || e.type === "memory.pruned"
+          ? [e.type, e.payload.memoryId]
+          : [e.type],
+      ),
+    ).toEqual([
       ["memory.edited", "m1"],
       ["memory.pruned", "m3"],
     ]);
@@ -134,7 +140,12 @@ describe("reflection", () => {
     expect(semantic[0]?.provenance.author).toBe("reflection");
     expect(getMemory(t.db, "e1")?.distilledAt).not.toBeNull();
     expect(getMemory(t.db, "e2")?.distilledAt).toBeNull();
-    expect((out[0]?.payload as { sourceMemoryIds: string[] }).sourceMemoryIds).toEqual(["e1"]);
+    const distilled = out[0];
+    expect(
+      distilled?.type === "memory.semantic_distilled"
+        ? distilled.payload.sourceMemoryIds
+        : undefined,
+    ).toEqual(["e1"]);
     // second pass only offers the remaining episode
     await runReflection(t.log, t.db, a, async (_s, eps) => {
       expect(eps.map((e) => e.memoryId)).toEqual(["e2"]);

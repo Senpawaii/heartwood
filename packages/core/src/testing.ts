@@ -1,8 +1,8 @@
-import type { Species } from "@heartwood/protocol";
+import type { EventPayloads, EventType, Species } from "@heartwood/protocol";
 import type { LabCtx } from "./context.js";
 import { openDb } from "./db.js";
 import { createDispatch, type TaskBrief } from "./dispatch.js";
-import { SqliteEventLog } from "./eventLog.js";
+import { type EventLog, SqliteEventLog } from "./eventLog.js";
 import { FakeLab } from "./fakeLab.js";
 import { nameSoul } from "./progression.js";
 import { defaultRules, type Rules } from "./rules.js";
@@ -93,4 +93,23 @@ export function makeTown(rules: Rules = defaultRules) {
       return { ...d, bodyId };
     },
   };
+}
+
+/** Resolves once `cond` holds, re-checking after every committed event (no polling, no timers). */
+export function until(log: EventLog, cond: () => boolean): Promise<void> {
+  return new Promise((resolve) => {
+    if (cond()) return resolve();
+    const off = log.subscribe(() => {
+      if (cond()) {
+        off();
+        resolve();
+      }
+    });
+  });
+}
+
+/** Payloads of every event of one type, typed by that event type. */
+export function payloads<T extends EventType>(log: EventLog, type: T): EventPayloads[T][] {
+  // read({ types: [type] }) only returns events of that type, so each payload has that type's shape
+  return log.read({ types: [type] }).map((e) => e.payload as EventPayloads[T]);
 }

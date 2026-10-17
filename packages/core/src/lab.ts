@@ -81,3 +81,41 @@ export class LabUnavailableError extends Error {}
 export function benchRef(r: BenchResult): string {
   return `${r.skill.name}@${r.skill.digest}#${r.suiteDigest}:${r.ranAt}`;
 }
+
+/**
+ * Placeholder until the real grimoire-lab adapter exists. Every capability fails loudly with
+ * LabUnavailableError; there is no silent stub. Rendering zero skills is the one exception
+ * because there is nothing to render.
+ */
+export class UnavailableLab implements LabPort {
+  constructor(private readonly reason = "no Lab adapter is configured") {}
+
+  private unavailable(op: string): never {
+    throw new LabUnavailableError(`${op}: ${this.reason}`);
+  }
+
+  async listSkills(): Promise<SkillRef[]> {
+    return this.unavailable("listSkills");
+  }
+  async resolve(): Promise<SkillRef> {
+    return this.unavailable("resolve");
+  }
+  async load(): Promise<LoadedSkill> {
+    return this.unavailable("load");
+  }
+  async verifyPin(): Promise<boolean> {
+    return this.unavailable("verifyPin");
+  }
+  async analyze(): Promise<BenchResult> {
+    return this.unavailable("analyze");
+  }
+  async proposeVersion(): Promise<ProposedVersion> {
+    return this.unavailable("proposeVersion");
+  }
+  async compare(): Promise<Comparison> {
+    return this.unavailable("compare");
+  }
+  async renderForTask(skills: readonly PinnedSkill[]): Promise<string> {
+    return skills.length === 0 ? "" : this.unavailable("renderForTask");
+  }
+}

@@ -125,6 +125,13 @@ export class FakeBackend implements WorkerBackend {
     return { state: this.settleOverride ?? (disposition === "release" ? "released" : "retained") };
   }
 
+  readonly replies: { groupRef: string; messageId: string; text: string }[] = [];
+
+  async reply(groupRef: string, messageId: string, text: string) {
+    this.record("reply", groupRef, messageId, text);
+    this.replies.push({ groupRef, messageId, text });
+  }
+
   async stopWorker(workerRef: string) {
     this.record("stopWorker", workerRef);
     this.stopped.push(workerRef);

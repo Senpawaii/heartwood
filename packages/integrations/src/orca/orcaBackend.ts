@@ -383,6 +383,23 @@ export class OrcaBackend implements WorkerBackend {
     );
   }
 
+  async reply(groupRef: string, messageId: string, text: string): Promise<void> {
+    await this.call(
+      [
+        "orchestration",
+        "reply",
+        "--id",
+        messageId,
+        "--body",
+        text,
+        "--run",
+        groupRef,
+        ...(await this.senderFor(groupRef)),
+      ],
+      z.looseObject({}),
+    );
+  }
+
   async poll(groupRef: string, o: PollOptions): Promise<PollBatch> {
     const types = o.wake.map((k) => ORCA_TYPE[k]).filter((t): t is string => !!t);
     // A consuming check is attributed to its caller; without --terminal it would use whatever Orca

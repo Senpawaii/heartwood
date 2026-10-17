@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { createDispatch } from "../dispatch.js";
 import { getBodyByWorkerRef, getDispatch, getSoul } from "../queries.js";
-import { makeTown } from "../testing.js";
+import { brief, makeTown, payloads, until } from "../testing.js";
 import { BackendError, type BackendMessage } from "./backend.js";
 import { BackendCoordinator, GroupLimitError } from "./coordinator.js";
 import { FakeBackend } from "./fakeBackend.js";
@@ -37,14 +38,6 @@ const batchesOf = (be: FakeBackend) =>
   be.calls
     .filter((c) => c.method === "poll")
     .map((c) => c.args[1] as { ack?: string; wake: string[] });
-
-async function waitFor(cond: () => boolean, ms = 2000) {
-  const end = Date.now() + ms;
-  while (!cond()) {
-    if (Date.now() > end) throw new Error("timeout waiting for condition");
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
 
 describe("BackendCoordinator.pollOnce", () => {
   it("translates done into events, settles the dispatch, then releases the worker", async () => {
@@ -124,7 +117,7 @@ describe("BackendCoordinator.pollOnce", () => {
     const w = await start();
     co.start(groupRef);
     be.pushMessage(groupRef, done("m1", w.workerRef));
-    await waitFor(() => getDispatch(t.db, w.dispatchId)?.state === "settled");
+    await until(t.log, () => getDispatch(t.db, w.dispatchId)?.state === "settled");
     await co.stop(groupRef);
     expect(be.pending(groupRef)).toEqual([]);
   });
@@ -187,9 +180,7 @@ describe("BackendCoordinator.pollOnce", () => {
     expect(await co.pollOnce(groupRef)).toBe(true);
     be.failNext("poll");
     await co.pollOnce(groupRef);
-    const counts = t.log
-      .read({ types: ["backend.poll_failed"] })
-      .map((e) => (e.payload as { consecutiveFailures: number }).consecutiveFailures);
+    const counts = payloads(t.log, "backend.poll_failed").map((p) => p.consecutiveFailures);
     expect(counts).toEqual([1, 2, 1]);
   });
 
@@ -259,6 +250,67 @@ describe("BackendCoordinator release outcomes", () => {
   });
 });
 
+describe("BackendCoordinator.registerWorker", () => {
+  const begin = async () => {
+    const s = await setup();
+    const d = await createDispatch(s.t.ctx, {
+      warbandId: s.warbandId,
+      soulId: s.soul,
+      brief: brief(),
+    });
+    const worker = await s.be.startWorker(s.groupRef, {
+      spec: d.spec,
+      agent: "claude",
+      placement: "new-child",
+    });
+    return { ...s, d, worker };
+  };
+
+  it("records the body and starts the dispatch", async () => {
+    const { t, co, groupRef, soul, d, worker } = await begin();
+    const { bodyId, settledEarly } = await co.registerWorker({
+      groupRef,
+      soulId: soul,
+      dispatchId: d.dispatchId,
+      worker,
+      agent: "claude",
+      placement: "new-child",
+    });
+    expect(settledEarly).toBe(false);
+    expect(getDispatch(t.db, d.dispatchId)).toMatchObject({ state: "running", bodyId });
+    expect(getBodyByWorkerRef(t.db, worker.workerRef)).toMatchObject({
+      bodyId,
+      dispatchId: d.dispatchId,
+    });
+  });
+
+  it("adopts a done that arrived while the worker was still starting", async () => {
+    const { t, be, co, groupRef, soul, d, worker } = await begin();
+    be.pushMessage(groupRef, done("m1", worker.workerRef));
+    await co.pollOnce(groupRef); // no body yet: recorded, but nothing to settle
+    expect(getDispatch(t.db, d.dispatchId)?.state).toBe("created");
+    expect(t.log.read({ types: ["backend.worker_done"] })).toHaveLength(1);
+
+    const { bodyId, settledEarly } = await co.registerWorker({
+      groupRef,
+      soulId: soul,
+      dispatchId: d.dispatchId,
+      worker,
+      agent: "claude",
+      placement: "new-child",
+    });
+
+    expect(settledEarly).toBe(true);
+    expect(getDispatch(t.db, d.dispatchId)).toMatchObject({
+      state: "settled",
+      outcome: "succeeded",
+    });
+    expect(getSoul(t.db, soul, t.rules)?.xp).toBe(t.rules.xp.taskSuccess);
+    expect(getBodyByWorkerRef(t.db, worker.workerRef)?.disposition).toBe("release");
+    expect(bodyId).toBeTruthy();
+  });
+});
+
 describe("BackendCoordinator.reconcile", () => {
   it("never treats a missing done or unverifiable liveness as death", async () => {
     const { t, be, co, groupRef, start } = await setup();
@@ -322,24 +374,29 @@ describe("BackendCoordinator group watching", () => {
     const w = await start();
     co.start(groupRef);
     be.pushMessage(groupRef, done("m1", w.workerRef));
-    await waitFor(() => getDispatch(t.db, w.dispatchId)?.state === "settled");
+    await until(t.log, () => getDispatch(t.db, w.dispatchId)?.state === "settled");
     await co.stop(groupRef);
     expect(co.watching).toEqual([]);
   });
 
   it("backs off exponentially after failures", async () => {
     const delays: number[] = [];
+    let fourthBackoff!: () => void;
+    const fourDelays = new Promise<void>((resolve) => {
+      fourthBackoff = resolve;
+    });
     const { be, co, groupRef } = await setup({
       baseBackoffMs: 100,
       maxBackoffMs: 350,
       livenessIntervalMs: 1e9,
       sleep: async (ms) => {
         delays.push(ms);
+        if (delays.length === 4) fourthBackoff();
       },
     });
     for (let i = 0; i < 4; i++) be.failNext("poll");
     co.start(groupRef);
-    await waitFor(() => delays.length >= 4);
+    await fourDelays;
     expect(delays.slice(0, 4)).toEqual([100, 200, 350, 350]);
     await co.stopAll();
   });

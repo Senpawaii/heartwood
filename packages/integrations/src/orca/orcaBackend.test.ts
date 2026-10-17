@@ -465,6 +465,24 @@ describe("OrcaBackend commands", () => {
     await expect(be(bad).abandonWorker("x")).rejects.toBeInstanceOf(BackendError);
   });
 
+  it("replies to a worker question on the group, from the group's terminal", async () => {
+    const { calls, runner } = scripted(ok({ message: { id: "msg_r" } }));
+    await be(runner).reply("run_1", "msg_q", "use postgres");
+    expect(calls[0]).toEqual([
+      "orchestration",
+      "reply",
+      "--id",
+      "msg_q",
+      "--body",
+      "use postgres",
+      "--run",
+      "run_1",
+      "--from",
+      "term_s",
+      "--json",
+    ]);
+  });
+
   it("reads terminal output", async () => {
     const { runner } = scripted(ok({ cursor: "c9", terminal: { tail: ["a", "b"] } }));
     expect(await be(runner).readWorker("d")).toEqual({ text: "a\nb", cursor: "c9" });

@@ -2,6 +2,7 @@ export * from "./backend/index.js";
 export * from "./context.js";
 export * from "./db.js";
 export * from "./dispatch.js";
+export * from "./errors.js";
 export * from "./eventLog.js";
 export * from "./fakeLab.js";
 export * from "./kv.js";

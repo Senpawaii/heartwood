@@ -25,12 +25,24 @@ describe("execaRunner", () => {
     expect(() => execaRunner("C:\\tools\\orca.cmd")).toThrow(/shell shim/);
   });
 
+  it("abort returns promptly even when a grandchild keeps the output pipes open", async () => {
+    // The parent exits at once but leaves a child holding stdout for 8s, like a CLI wrapper does.
+    const script = `require("child_process").spawn(process.execPath, ["-e", "setTimeout(()=>{}, 8000)"], { stdio: ["ignore", "inherit", "inherit"] }); setTimeout(()=>{}, 8000)`;
+    const ac = new AbortController();
+    const started = Date.now();
+    const p = execaRunner(process.execPath)(["-e", script], { signal: ac.signal });
+    // Real timer on purpose: the OS pipe/process behaviour under test cannot be driven by fake timers.
+    setTimeout(() => ac.abort(), 150);
+    expect((await p).exitCode).toBe(130);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
   it("aborts a running process", async () => {
     const ac = new AbortController();
     const p = execaRunner(process.execPath)(["-e", "setTimeout(()=>{}, 30000)"], {
       signal: ac.signal,
     });
-    setTimeout(() => ac.abort(), 100);
+    ac.abort(); // the process is already spawned; no need to wait
     expect((await p).exitCode).toBe(130);
   });
 });

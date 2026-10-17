@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { PinnedSkill } from "@heartwood/protocol";
+import { NotFoundError } from "./errors.js";
 import {
   type BenchResult,
   type Comparison,
@@ -61,13 +62,13 @@ export class FakeLab implements LabPort {
 
   async resolve(name: string): Promise<SkillRef> {
     const d = this.latest.get(name);
-    if (!d) throw new Error(`skill not found: ${name}`);
+    if (!d) throw new NotFoundError(`skill not found: ${name}`);
     return this.ref(name, d);
   }
 
   async load(ref: PinnedSkill): Promise<LoadedSkill> {
     const body = this.versions.get(ref.name)?.get(ref.digest);
-    if (body === undefined) throw new Error(`skill not found: ${ref.name}@${ref.digest}`);
+    if (body === undefined) throw new NotFoundError(`skill not found: ${ref.name}@${ref.digest}`);
     if (digestOf(body) !== ref.digest)
       throw new DigestMismatchError(`${ref.name}: content does not match ${ref.digest}`);
     return { ref: this.ref(ref.name, ref.digest), body };

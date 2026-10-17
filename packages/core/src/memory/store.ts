@@ -113,11 +113,10 @@ export function personaFor(db: Db, soulId: string): string | undefined {
     )
     .get(soulId) as { text: string } | undefined;
   if (r) return r.text;
-  return (
-    db.prepare("SELECT persona FROM souls WHERE soul_id = ?").get(soulId) as
-      | { persona: string }
-      | undefined
-  )?.persona;
+  const soul = db.prepare("SELECT persona FROM souls WHERE soul_id = ?").get(soulId) as
+    | { persona: string }
+    | undefined;
+  return soul?.persona;
 }
 
 /** Event for writing a soul's episodic record when a dispatch settles. */

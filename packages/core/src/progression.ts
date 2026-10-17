@@ -1,6 +1,7 @@
 import type { Actor, HeartwoodEvent, NewEvent, Species } from "@heartwood/protocol";
 import { ulid } from "ulid";
 import type { Ctx } from "./context.js";
+import { DomainError, NotFoundError } from "./errors.js";
 import { getSoul } from "./queries.js";
 import { levelForXp, rankForLevel } from "./rules.js";
 
@@ -49,7 +50,7 @@ export function grantXp(
   if (o.amount <= 0) return [];
   return ctx.log.transaction(() => {
     const soul = getSoul(ctx.db, o.soulId, ctx.rules);
-    if (!soul) throw new Error(`unknown soul: ${o.soulId}`);
+    if (!soul) throw new NotFoundError(`unknown soul: ${o.soulId}`);
     const actor: Actor = { kind: "daemon" };
     const correlation = {
       soulId: o.soulId,
@@ -90,13 +91,13 @@ export function grantXp(
 /** Species evolution: unlocked by level, changes the soul's form. */
 export function evolveSoul(ctx: Ctx, soulId: string): HeartwoodEvent[] {
   const soul = getSoul(ctx.db, soulId, ctx.rules);
-  if (!soul) throw new Error(`unknown soul: ${soulId}`);
+  if (!soul) throw new NotFoundError(`unknown soul: ${soulId}`);
   if (soul.level < ctx.rules.evolution.minLevel)
-    throw new Error(
+    throw new DomainError(
       `${soul.name} needs level ${ctx.rules.evolution.minLevel} to evolve (is ${soul.level})`,
     );
   const toForm = ctx.rules.evolution.forms[soul.species];
-  if (soul.form === toForm) throw new Error(`${soul.name} already evolved`);
+  if (soul.form === toForm) throw new DomainError(`${soul.name} already evolved`);
   return ctx.log.append([
     {
       type: "soul.evolved",
@@ -115,17 +116,18 @@ export function awakenSoul(
   ctx: Ctx,
   o: { soulId: string; title: string; proof: { kind: "benchmark" | "project"; ref: string } },
 ): HeartwoodEvent[] {
-  if (!getSoul(ctx.db, o.soulId, ctx.rules)) throw new Error(`unknown soul: ${o.soulId}`);
+  if (!getSoul(ctx.db, o.soulId, ctx.rules)) throw new NotFoundError(`unknown soul: ${o.soulId}`);
   const row = ctx.db.prepare("SELECT type, payload FROM events WHERE id = ?").get(o.proof.ref) as
     | { type: string; payload: string }
     | undefined;
-  if (!row) throw new Error(`awakening proof not found: ${o.proof.ref}`);
+  if (!row) throw new NotFoundError(`awakening proof not found: ${o.proof.ref}`);
   const payload = JSON.parse(row.payload);
   const ok =
     o.proof.kind === "benchmark"
       ? row.type === "skill.analyzed"
       : row.type === "dispatch.settled" && payload.outcome === "succeeded";
-  if (!ok) throw new Error(`event ${o.proof.ref} (${row.type}) is not valid ${o.proof.kind} proof`);
+  if (!ok)
+    throw new DomainError(`event ${o.proof.ref} (${row.type}) is not valid ${o.proof.kind} proof`);
   return ctx.log.append([
     {
       type: "soul.awakened",
