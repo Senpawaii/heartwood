@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getBodyByWorker, getDispatch, getSoul } from "../queries.js";
+import { getBodyByOrcaDispatch, getDispatch, getSoul } from "../queries.js";
 import { makeTown } from "../testing.js";
 import { OrcaCoordinator, RunLimitError } from "./coordinator.js";
 import { FakeOrcaGateway } from "./fakeGateway.js";
@@ -13,7 +13,7 @@ async function setup(opts: ConstructorParameters<typeof OrcaCoordinator>[2] = {}
   const { runId } = await gw.createRun("ship");
   const { warbandId } = t.formWarband(soul, [], runId);
   const start = async () => {
-    const { workerId } = await gw.startWorker(runId, {
+    const { dispatchId: workerId } = await gw.startWorker(runId, {
       spec: "s",
       agent: "claude",
       worktree: "new-child",
@@ -24,12 +24,12 @@ async function setup(opts: ConstructorParameters<typeof OrcaCoordinator>[2] = {}
   return { t, gw, co, soul, runId, warbandId, start };
 }
 
-const done = (id: string, workerId: string, outcome: "succeeded" | "failed" = "succeeded") => ({
+const done = (id: string, dispatchId: string, outcome: "succeeded" | "failed" = "succeeded") => ({
   id,
   type: "worker_done",
-  workerId,
+  dispatchId,
   outcome,
-  summary: "all good",
+  body: "all good",
 });
 
 describe("OrcaCoordinator.pollOnce", () => {
@@ -45,29 +45,29 @@ describe("OrcaCoordinator.pollOnce", () => {
       outcome: "succeeded",
     });
     expect(getSoul(t.db, soul, t.rules)?.xp).toBe(t.rules.xp.taskSuccess);
-    expect(gw.pending(runId)).toEqual([]);
+    expect(gw.pending(runId)).toHaveLength(1); // acked on the next check
     expect(gw.dispositions.get(w.workerId)).toBe("release");
-    expect(getBodyByWorker(t.db, w.workerId)?.disposition).toBe("release");
+    expect(getBodyByOrcaDispatch(t.db, w.workerId)?.disposition).toBe("release");
     const types = t.log.read().map((e) => e.type);
     expect(types).toContain("orca.worker_done");
     expect(types).toContain("body.released");
-    // settle happens before ack, ack before worker release
-    const order = gw.calls.map((c) => c.method).filter((m) => ["ack", "settleWorker"].includes(m));
-    expect(order).toEqual(["ack", "settleWorker"]);
+    // the worker is released only after the commit, and the delivery is not acked by the same call
+    expect(gw.calls.some((c) => c.method === "settleWorker")).toBe(true);
   });
 
   it("drops heartbeats: acked and tracked in a projection, but never appended as events", async () => {
     const { t, gw, co, runId, start } = await setup();
     const w = await start();
-    gw.pushMessage(runId, { id: "h1", type: "heartbeat", workerId: w.workerId });
-    gw.pushMessage(runId, { id: "h2", type: "heartbeat", workerId: w.workerId });
+    gw.pushMessage(runId, { id: "h1", type: "heartbeat", dispatchId: w.workerId });
+    gw.pushMessage(runId, { id: "h2", type: "heartbeat", dispatchId: w.workerId });
     const before = t.log.lastSeq();
     await co.pollOnce(runId);
     expect(t.log.lastSeq()).toBe(before);
+    await co.pollOnce(runId); // carries the ack of the heartbeat-only delivery
     expect(gw.pending(runId)).toEqual([]);
     expect(
       t.db
-        .prepare("SELECT COUNT(*) AS c FROM worker_heartbeats WHERE orca_worker_id = ?")
+        .prepare("SELECT COUNT(*) AS c FROM worker_heartbeats WHERE orca_dispatch_id = ?")
         .get(w.workerId),
     ).toEqual({ c: 1 });
   });
@@ -83,23 +83,48 @@ describe("OrcaCoordinator.pollOnce", () => {
     ]);
   });
 
-  it("is idempotent when the ack failed and Orca replays the batch", async () => {
+  it("acks a delivery only on the next check, after its effects were committed", async () => {
+    const { t, gw, co, runId, start } = await setup();
+    const w = await start();
+    gw.pushMessage(runId, done("m1", w.workerId));
+    await co.pollOnce(runId);
+    expect(getDispatch(t.db, w.dispatchId)?.state).toBe("settled");
+    expect(gw.pending(runId)).toHaveLength(1); // delivered, not yet acked
+    await co.pollOnce(runId);
+    const checks = gw.calls
+      .filter((c) => c.method === "check")
+      .map((c) => c.args[1] as { ack?: string });
+    expect(checks[0]?.ack).toBeUndefined();
+    expect(checks[1]?.ack).toMatch(/^delivery_/);
+    expect(gw.pending(runId)).toEqual([]);
+  });
+
+  it("is idempotent when the daemon restarts before acking and Orca replays the delivery", async () => {
     const { t, gw, co, runId, soul, start } = await setup();
     const w = await start();
     gw.pushMessage(runId, done("m1", w.workerId));
-    gw.failNext("ack");
-    expect(await co.pollOnce(runId)).toBe(false); // committed but not acked
-    expect(gw.pending(runId)).toHaveLength(1);
-
-    expect(await co.pollOnce(runId)).toBe(true); // replay
-    expect(gw.pending(runId)).toEqual([]);
+    await co.pollOnce(runId);
+    const restarted = new OrcaCoordinator(t.ctx, gw); // loses the in-memory pending ack
+    expect(await restarted.pollOnce(runId)).toBe(true); // replay of the same delivery
     expect(getSoul(t.db, soul, t.rules)?.xp).toBe(t.rules.xp.taskSuccess); // not doubled
     expect(t.log.read({ types: ["orca.worker_done"] })).toHaveLength(1);
     expect(t.log.read({ types: ["dispatch.settled"] })).toHaveLength(1);
     expect(t.log.read({ types: ["orca.mailbox_batch"] })).toHaveLength(1);
+    await restarted.pollOnce(runId);
+    expect(gw.pending(runId)).toEqual([]);
   });
 
-  it("does not ack when committing the batch fails", async () => {
+  it("stop() flushes the pending ack", async () => {
+    const { t, gw, co, runId, start } = await setup({ livenessIntervalMs: 1e9 });
+    const w = await start();
+    co.start(runId);
+    gw.pushMessage(runId, done("m1", w.workerId));
+    await vi_waitFor(() => getDispatch(t.db, w.dispatchId)?.state === "settled");
+    await co.stop(runId);
+    expect(gw.pending(runId)).toEqual([]);
+  });
+
+  it("does not carry an ack forward when committing the batch fails", async () => {
     const { t, gw, co, runId, start } = await setup();
     const w = await start();
     gw.pushMessage(runId, done("m1", w.workerId));
@@ -107,18 +132,43 @@ describe("OrcaCoordinator.pollOnce", () => {
       "CREATE TRIGGER boom BEFORE INSERT ON xp_ledger BEGIN SELECT RAISE(ABORT, 'disk full'); END",
     );
     expect(await co.pollOnce(runId)).toBe(false);
-    expect(gw.calls.some((c) => c.method === "ack")).toBe(false);
-    expect(gw.pending(runId)).toHaveLength(1);
     expect(getDispatch(t.db, w.dispatchId)?.state).toBe("running"); // whole batch rolled back
     t.db.exec("DROP TRIGGER boom");
-    expect(await co.pollOnce(runId)).toBe(true);
+    expect(await co.pollOnce(runId)).toBe(true); // same delivery replayed
+    const checks = gw.calls
+      .filter((c) => c.method === "check")
+      .map((c) => c.args[1] as { ack?: string });
+    expect(checks.every((c) => c.ack === undefined)).toBe(true);
     expect(getDispatch(t.db, w.dispatchId)?.state).toBe("settled");
+  });
+
+  it("never settles on a worker_done Orca rejected", async () => {
+    const { t, gw, co, runId, soul, start } = await setup();
+    const w = await start();
+    gw.pushMessage(runId, {
+      ...done("m1", w.workerId),
+      rejection: { code: "unknown_task", reason: "stale" },
+    });
+    gw.pushMessage(runId, {
+      id: "m2",
+      type: "status",
+      subject: "x",
+      rejection: { code: "sender_not_assignee" },
+    });
+    await co.pollOnce(runId);
+    expect(getDispatch(t.db, w.dispatchId)?.state).toBe("running");
+    expect(getSoul(t.db, soul, t.rules)?.xp).toBe(0);
+    expect(t.log.read({ types: ["orca.worker_done"] })).toEqual([]);
+    expect(t.log.read({ types: ["orca.message_rejected"] }).map((e) => e.payload)).toMatchObject([
+      { orcaMessageId: "m1", code: "unknown_task", messageType: "worker_done" },
+      { orcaMessageId: "m2", code: "sender_not_assignee" },
+    ]);
   });
 
   it("records CLI failures with a consecutive count and resets on success", async () => {
     const { t, gw, co, runId } = await setup();
-    gw.failNext("check", new OrcaCliError("exit 1", 1));
-    gw.failNext("check", new OrcaCliError("exit 1", 1));
+    gw.failNext("check", new OrcaCliError("exit 1", "internal", 1));
+    gw.failNext("check", new OrcaCliError("exit 1", "internal", 1));
     expect(await co.pollOnce(runId)).toBe(false);
     expect(await co.pollOnce(runId)).toBe(false);
     expect(await co.pollOnce(runId)).toBe(true);
@@ -136,10 +186,15 @@ describe("OrcaCoordinator.pollOnce", () => {
     gw.pushMessage(runId, {
       id: "e1",
       type: "escalation",
-      workerId: w.workerId,
-      text: "blocked on creds",
+      dispatchId: w.workerId,
+      body: "blocked on creds",
     });
-    gw.pushMessage(runId, { id: "q1", type: "question", workerId: w.workerId, text: "which db?" });
+    gw.pushMessage(runId, {
+      id: "q1",
+      type: "question",
+      dispatchId: w.workerId,
+      body: "which db?",
+    });
     gw.pushMessage(runId, { id: "x1", type: "telepathy" });
     await co.pollOnce(runId);
     expect(t.log.read({ types: ["escalation.raised"] })[0]?.payload).toMatchObject({
@@ -153,7 +208,6 @@ describe("OrcaCoordinator.pollOnce", () => {
     expect(t.log.read({ types: ["orca.unknown_message"] })[0]?.payload).toMatchObject({
       messageType: "telepathy",
     });
-    expect(gw.pending(runId)).toEqual([]);
   });
 
   it("applies the configured disposition and retries a failed settleWorker on reconcile", async () => {
@@ -164,10 +218,35 @@ describe("OrcaCoordinator.pollOnce", () => {
     gw.pushMessage(runId, done("m1", w.workerId));
     gw.failNext("settleWorker");
     await co.pollOnce(runId);
-    expect(getBodyByWorker(t.db, w.workerId)?.disposition).toBeNull();
+    expect(getBodyByOrcaDispatch(t.db, w.workerId)?.disposition).toBeNull();
     await co.reconcile(runId);
     expect(gw.dispositions.get(w.workerId)).toBe("retain");
-    expect(getBodyByWorker(t.db, w.workerId)?.disposition).toBe("retain");
+    expect(getBodyByOrcaDispatch(t.db, w.workerId)?.disposition).toBe("retain");
+  });
+});
+
+describe("OrcaCoordinator release outcomes", () => {
+  it("records body.retained, not released, when Orca could not prove the terminal identity", async () => {
+    const { t, gw, co, runId, start } = await setup();
+    const w = await start();
+    gw.settleOverride = "retained";
+    gw.pushMessage(runId, done("m1", w.workerId));
+    await co.pollOnce(runId);
+    expect(getBodyByOrcaDispatch(t.db, w.workerId)?.disposition).toBe("retain");
+    expect(t.log.read({ types: ["body.released"] })).toEqual([]);
+  });
+
+  it("records nothing while Orca is still releasing, then records the release once", async () => {
+    const { t, gw, co, runId, start } = await setup();
+    const w = await start();
+    gw.settleOverride = "pending";
+    gw.pushMessage(runId, done("m1", w.workerId));
+    await co.pollOnce(runId);
+    expect(getBodyByOrcaDispatch(t.db, w.workerId)?.disposition).toBeNull();
+    gw.settleOverride = undefined;
+    await co.reconcile(runId);
+    await co.reconcile(runId);
+    expect(t.log.read({ types: ["body.released"] })).toHaveLength(1);
   });
 });
 
@@ -178,7 +257,7 @@ describe("OrcaCoordinator.reconcile", () => {
     gw.setLiveness(w.workerId, "unverifiable");
     await co.reconcile(runId);
     expect(getDispatch(t.db, w.dispatchId)?.state).toBe("running");
-    expect(getBodyByWorker(t.db, w.workerId)?.liveness).toBe("unverifiable");
+    expect(getBodyByOrcaDispatch(t.db, w.workerId)?.liveness).toBe("unverifiable");
     expect(gw.stopped).toEqual([]);
   });
 
@@ -192,7 +271,7 @@ describe("OrcaCoordinator.reconcile", () => {
       outcome: "abandoned",
     });
     expect(getSoul(t.db, soul, t.rules)?.xp).toBe(0);
-    expect(getBodyByWorker(t.db, w.workerId)).toMatchObject({
+    expect(getBodyByOrcaDispatch(t.db, w.workerId)).toMatchObject({
       liveness: "exited",
       disposition: "release",
     });

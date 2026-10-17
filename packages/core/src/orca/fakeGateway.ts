@@ -6,21 +6,33 @@ import {
   OrcaCliError,
   type OrcaGateway,
   type OrcaMessage,
+  type SettleResult,
+  type StartedWorker,
   type StartWorkerInput,
   type WorkerProjection,
 } from "./gateway.js";
 
-/** In-memory Orca for tests. Mimics: FIFO mailbox, replay until ack, heartbeats always included. */
+interface RunBox {
+  queue: OrcaMessage[];
+  delivery?: { id: string; messages: OrcaMessage[] };
+  waiters: (() => void)[];
+}
+
+/**
+ * In-memory Orca for tests. Mimics the verified behaviour: FIFO mailbox delivered as one whole
+ * batch with a delivery id, replayed until that id is acked on the next check, heartbeats included.
+ */
 export class FakeOrcaGateway implements OrcaGateway {
   readonly calls: { method: string; args: unknown[] }[] = [];
-  private runs = 0;
-  private tasks = 0;
+  private seq = 0;
+  private runs = new Map<string, RunBox>();
   private workers = new Map<string, WorkerProjection & { runId: string }>();
-  private mailbox = new Map<string, OrcaMessage[]>();
-  private waiters = new Map<string, (() => void)[]>();
   private failures = new Map<string, Error[]>();
   readonly dispositions = new Map<string, Disposition>();
   readonly stopped: string[] = [];
+  /** Force the state settleWorker reports (e.g. "retained" for an unproven identity). */
+  settleOverride?: SettleResult["state"];
+  readonly abandoned: string[] = [];
 
   private record(method: string, ...args: unknown[]): void {
     this.calls.push({ method, args });
@@ -28,42 +40,56 @@ export class FakeOrcaGateway implements OrcaGateway {
     if (f) throw f;
   }
 
+  private box(runId: string): RunBox {
+    let b = this.runs.get(runId);
+    if (!b) this.runs.set(runId, (b = { queue: [], waiters: [] }));
+    return b;
+  }
+
   /** Make the next call to `method` reject. */
-  failNext(method: string, err: Error = new OrcaCliError("boom", 1)): void {
+  failNext(method: string, err: Error = new OrcaCliError("boom", "internal", 1)): void {
     this.failures.set(method, [...(this.failures.get(method) ?? []), err]);
   }
 
   pushMessage(runId: string, m: OrcaMessage): void {
-    this.mailbox.set(runId, [...(this.mailbox.get(runId) ?? []), m]);
-    for (const w of this.waiters.get(runId)?.splice(0) ?? []) w();
+    const b = this.box(runId);
+    b.queue.push(m);
+    for (const w of b.waiters.splice(0)) w();
   }
 
-  setLiveness(workerId: string, liveness: Liveness): void {
-    const w = this.workers.get(workerId);
+  setLiveness(dispatchId: string, liveness: Liveness): void {
+    const w = this.workers.get(dispatchId);
     if (w) w.liveness = liveness;
   }
 
+  /** Messages Orca would still deliver (current unacked delivery plus queued). */
   pending(runId: string): OrcaMessage[] {
-    return this.mailbox.get(runId) ?? [];
+    const b = this.box(runId);
+    return [...(b.delivery?.messages ?? []), ...b.queue];
   }
 
   async createRun(objective: string) {
     this.record("createRun", objective);
-    const runId = `run_${++this.runs}`;
-    this.mailbox.set(runId, []);
+    const runId = `run_${++this.seq}`;
+    this.box(runId);
     return { runId };
   }
 
   async createTask(runId: string, t: { spec: string; deps?: string[] }) {
     this.record("createTask", runId, t);
-    return { taskId: `task_${++this.tasks}` };
+    return { taskId: `task_${++this.seq}` };
   }
 
-  async startWorker(runId: string, w: StartWorkerInput) {
+  async startWorker(runId: string, w: StartWorkerInput): Promise<StartedWorker> {
     this.record("startWorker", runId, w);
-    const workerId = `w_${this.workers.size + 1}`;
-    this.workers.set(workerId, { workerId, liveness: "live", runId });
-    return { workerId };
+    const dispatchId = `ctx_${++this.seq}`;
+    this.workers.set(dispatchId, { dispatchId, liveness: "live", runId });
+    return {
+      dispatchId,
+      taskId: w.taskId ?? `task_${++this.seq}`,
+      terminalHandle: `term_${dispatchId}`,
+      state: "running",
+    };
   }
 
   async listWorkers(runId: string): Promise<WorkerProjection[]> {
@@ -73,43 +99,43 @@ export class FakeOrcaGateway implements OrcaGateway {
       .map(({ runId: _r, ...w }) => ({ ...w }));
   }
 
-  async readWorker(workerId: string, cursor?: string) {
-    this.record("readWorker", workerId, cursor);
+  async readWorker(dispatchId: string, cursor?: string) {
+    this.record("readWorker", dispatchId, cursor);
     return { text: "", cursor };
   }
 
-  async settleWorker(runId: string, workerId: string, disposition: Disposition) {
-    this.record("settleWorker", runId, workerId, disposition);
-    this.dispositions.set(workerId, disposition);
+  async settleWorker(dispatchId: string, disposition: Disposition): Promise<SettleResult> {
+    this.record("settleWorker", dispatchId, disposition);
+    this.dispositions.set(dispatchId, disposition);
+    return { state: this.settleOverride ?? (disposition === "release" ? "released" : "retained") };
   }
 
-  async stopWorker(workerId: string) {
-    this.record("stopWorker", workerId);
-    this.stopped.push(workerId);
+  async stopWorker(dispatchId: string) {
+    this.record("stopWorker", dispatchId);
+    this.stopped.push(dispatchId);
+  }
+
+  async abandonWorker(dispatchId: string) {
+    this.record("abandonWorker", dispatchId);
+    this.abandoned.push(dispatchId);
   }
 
   async check(runId: string, opts: CheckOptions): Promise<MailboxBatch> {
     this.record("check", runId, opts);
-    if (opts.wait && this.pending(runId).length === 0) {
+    const b = this.box(runId);
+    if (opts.ack && b.delivery?.id === opts.ack) b.delivery = undefined;
+    if (!b.delivery && opts.wait && b.queue.length === 0) {
       await new Promise<void>((resolve) => {
-        const done = () => resolve();
-        this.waiters.set(runId, [...(this.waiters.get(runId) ?? []), done]);
-        opts.signal?.addEventListener("abort", done, { once: true });
+        b.waiters.push(resolve);
+        opts.signal?.addEventListener("abort", () => resolve(), { once: true });
       });
     }
-    return { messages: [...this.pending(runId)] };
-  }
-
-  async ack(runId: string, ids: readonly string[]) {
-    this.record("ack", runId, ids);
-    const gone = new Set(ids);
-    this.mailbox.set(
-      runId,
-      this.pending(runId).filter((m) => !gone.has(m.id)),
-    );
+    if (!b.delivery && b.queue.length > 0)
+      b.delivery = { id: `delivery_${++this.seq}`, messages: b.queue.splice(0) };
+    return { deliveryId: b.delivery?.id ?? null, messages: [...(b.delivery?.messages ?? [])] };
   }
 
   async capabilities() {
-    return { version: "fake", commands: ["orchestration"] };
+    return { version: "fake", capabilities: ["orchestration.contract.v1"] };
   }
 }

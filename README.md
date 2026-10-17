@@ -12,13 +12,15 @@ The character mechanics borrow vocabulary only; all names and lore are original.
 |---|---|
 | `@heartwood/protocol` | Zod event schemas (town, soul, body, warband, dispatch, orca, memory, skill) and domain enums |
 | `@heartwood/core` | Append-only SQLite event log + projections, XP/level/rank rules, skill usage + proficiency, memory (FTS5, top-k injection, Markdown view, reflection), `LabPort` + `FakeLab`, `OrcaGateway` + `FakeOrcaGateway`, `OrcaCoordinator` |
-| `daemon`, `integrations` (real Orca CLI gateway, grimoire-lab adapter), `cli`, `apps/web` | not started |
+| `@heartwood/integrations` | `OrcaCliGateway`: the real Orca gateway over `orca … --json` (execa, argv, no shell), with contract tests built from captured Orca output and an opt-in live smoke test |
+| `daemon`, grimoire-lab adapter, `cli`, `apps/web` | not started |
 
 ## Design notes
 
 - **The event log is the source of truth.** Read models are projections written in the same transaction as the append and can be rebuilt (`rebuildProjections`).
 - **Rank is derived from level**, never stored. `soul.ranked` is a notification only.
 - **Heartbeats are not events.** The coordinator drops them at translation and keeps only the last heartbeat time.
+- **Orca facts (verified against Orca 1.4.200).** Workers are addressed by Orca *Dispatch id* (`ctx_…`). `check` returns a whole FIFO *delivery* with a `deliveryId`, replayed until that id is passed as `--ack` on the **next** `check` (there is no separate ack command). Orca reports refused lifecycle messages as normal messages carrying `_orcaLifecycleRejection`; they must never settle anything. A `worker-start` receipt of `outcome_unknown` means the first turn was not observed, not that it failed. `run-create`/`task-create`/`worker-start` need a sender terminal (`--from`) when the daemon is not inside an Orca terminal; `check` and `worker-*` do not.
 - **Orca is pull-based.** `OrcaCoordinator` is the sole mailbox consumer per Run: translate, commit, *then* ack. Replays are idempotent via a unique `(type, orcaMessageId)` index. A missing `worker_done` never proves death; only `liveness: exited` does.
 - **Skill usage** is recorded with `evidence: "injected" | "loaded"`. Today only `injected` (skill was in the spec and the dispatch settled) is produced, which can overcount; the UI must label it.
 - **Foreman** is daemon logic; a member soul holds the role and earns a separate, capped bonus (never credited for decisions it didn't make).
@@ -31,5 +33,12 @@ The character mechanics borrow vocabulary only; all names and lore are original.
 pnpm install
 pnpm lint && pnpm typecheck && pnpm test
 ```
+
+Live Orca smoke test (creates a throwaway Run and Task, never starts a worker):
+
+```
+HEARTWOOD_ORCA_LIVE=1 [HEARTWOOD_ORCA_SENDER=<terminal handle>] pnpm test
+```
+`HEARTWOOD_ORCA_SENDER` is required when not running inside an Orca terminal.
 
 Node 22+, pnpm.

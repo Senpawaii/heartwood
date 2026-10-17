@@ -82,7 +82,8 @@ export const payloadSchemas = {
     bodyId: Id,
     soulId: Id,
     dispatchId: Id,
-    orcaWorkerId: z.string(),
+    orcaDispatchId: z.string(),
+    orcaTerminalHandle: z.string().optional(),
     agent: BodyAgent,
     model: z.string().optional(),
     worktree: z.string(),
@@ -154,9 +155,18 @@ export const payloadSchemas = {
   "orca.worker_done": z.object({
     runId: z.string(),
     orcaMessageId: z.string(),
-    workerId: z.string(),
+    /** Orca's Dispatch id (`ctx_…`); this is how Orca addresses a worker. */
+    orcaDispatchId: z.string(),
     outcome: Outcome,
     summary: z.string().optional(),
+  }),
+  /** Orca refused a lifecycle message (e.g. stale or unknown dispatch). It settles nothing. */
+  "orca.message_rejected": z.object({
+    runId: z.string(),
+    orcaMessageId: z.string(),
+    messageType: z.string(),
+    code: z.string(),
+    reason: z.string().optional(),
   }),
   "orca.unknown_message": z.object({
     runId: z.string(),

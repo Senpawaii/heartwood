@@ -103,13 +103,14 @@ export function applyProjections(db: Db, e: HeartwoodEvent, rules: Rules): void 
     case "body.spawned": {
       const p = e.payload;
       db.prepare(
-        `INSERT INTO bodies (body_id, soul_id, dispatch_id, orca_worker_id, agent, model, worktree, spawned_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO bodies (body_id, soul_id, dispatch_id, orca_dispatch_id, orca_terminal_handle, agent, model, worktree, spawned_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         p.bodyId,
         p.soulId,
         p.dispatchId,
-        p.orcaWorkerId,
+        p.orcaDispatchId,
+        p.orcaTerminalHandle ?? null,
         p.agent,
         p.model ?? null,
         p.worktree,

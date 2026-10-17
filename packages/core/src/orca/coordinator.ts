@@ -1,8 +1,8 @@
 import type { HeartwoodEvent, NewEvent } from "@heartwood/protocol";
 import type { Ctx } from "../context.js";
 import { settleDispatch } from "../dispatch.js";
-import { getBody, getBodyByWorker, getDispatch } from "../queries.js";
-import type { Disposition, OrcaGateway, OrcaMessage } from "./gateway.js";
+import { getBody, getBodyByOrcaDispatch, getDispatch } from "../queries.js";
+import type { Disposition, OrcaGateway, OrcaMessage, SettleResult } from "./gateway.js";
 
 /** Types that wake the long poll. `heartbeat` is excluded on purpose. */
 export const WAKE_TYPES = ["worker_done", "escalation", "question"] as const;
@@ -40,6 +40,8 @@ const sleepAbortable = (ms: number, signal: AbortSignal) =>
 export class OrcaCoordinator {
   private watches = new Map<string, Watch>();
   private failures = new Map<string, number>();
+  /** Last committed delivery per Run, acknowledged on the next check. */
+  private pendingAck = new Map<string, string>();
   private readonly max: number;
   private readonly disposition: NonNullable<CoordinatorOptions["disposition"]>;
   private readonly sleep: NonNullable<CoordinatorOptions["sleep"]>;
@@ -56,21 +58,26 @@ export class OrcaCoordinator {
     this.now = opts.now ?? (() => new Date());
   }
 
-  /** One poll/translate/commit/ack cycle. Returns false if the CLI failed (recorded, not thrown). */
+  /**
+   * One poll/translate/commit cycle. Returns false if the CLI failed (recorded, not thrown).
+   * Orca acks a whole delivery by id on the NEXT check, so the ack is only carried forward after
+   * the batch has been durably committed; a crash or failure before then replays the delivery.
+   */
   async pollOnce(
     runId: string,
     o: { wait?: boolean; signal?: AbortSignal } = {},
   ): Promise<boolean> {
-    let ids: string[] = [];
     try {
+      const ack = this.pendingAck.get(runId);
       const batch = await this.gateway.check(runId, {
         types: WAKE_TYPES,
         wait: o.wait ?? false,
+        ack,
         signal: o.signal,
       });
-      ids = batch.messages.map((m) => m.id);
+      if (ack) this.pendingAck.delete(runId);
       const settled = this.ingest(runId, batch.messages);
-      if (ids.length) await this.gateway.ack(runId, ids);
+      if (batch.deliveryId) this.pendingAck.set(runId, batch.deliveryId);
       this.failures.set(runId, 0);
       for (const bodyId of settled) await this.applyDisposition(runId, bodyId);
       return true;
@@ -94,6 +101,18 @@ export class OrcaCoordinator {
     }
   }
 
+  /** Acknowledge the last committed delivery without waiting (used on stop). Best effort. */
+  private async flushAck(runId: string): Promise<void> {
+    const ack = this.pendingAck.get(runId);
+    if (!ack) return;
+    try {
+      await this.gateway.check(runId, { types: WAKE_TYPES, wait: false, ack });
+      this.pendingAck.delete(runId);
+    } catch {
+      // Orca replays the delivery; the (type, orcaMessageId) index makes that harmless.
+    }
+  }
+
   /** Translate + commit one batch atomically. Returns ids of bodies whose dispatch was just settled. */
   private ingest(runId: string, messages: OrcaMessage[]): string[] {
     const settledBodies: string[] = [];
@@ -101,7 +120,8 @@ export class OrcaCoordinator {
       const real = messages.filter((m) => m.type !== "heartbeat");
       const touch = this.ctx.db.prepare("INSERT OR REPLACE INTO worker_heartbeats VALUES (?, ?)");
       for (const m of messages)
-        if (m.type === "heartbeat" && m.workerId) touch.run(m.workerId, this.now().toISOString());
+        if (m.type === "heartbeat" && m.dispatchId)
+          touch.run(m.dispatchId, this.now().toISOString());
       if (real.length === 0) return;
       this.ctx.log.append([
         {
@@ -117,23 +137,39 @@ export class OrcaCoordinator {
         },
       ]);
       for (const m of real) {
-        const body = m.workerId ? getBodyByWorker(this.ctx.db, m.workerId) : undefined;
+        const body = m.dispatchId ? getBodyByOrcaDispatch(this.ctx.db, m.dispatchId) : undefined;
         const correlation = {
           runId,
           ...(body ? { soulId: body.soulId, dispatchId: body.dispatchId } : {}),
         };
         const actor = { kind: "orca" as const };
         // each branch appends idempotently; duplicates (replayed messages) yield no events
-        if (m.type === "worker_done") {
+        if (m.rejection) {
+          // Orca refused this lifecycle message (e.g. stale/unknown dispatch): it settles nothing.
+          this.ctx.log.append([
+            {
+              type: "orca.message_rejected",
+              payload: {
+                runId,
+                orcaMessageId: m.id,
+                messageType: m.type,
+                code: m.rejection.code,
+                reason: m.rejection.reason,
+              },
+              actor,
+              correlation,
+            },
+          ]);
+        } else if (m.type === "worker_done") {
           const appended = this.ctx.log.append([
             {
               type: "orca.worker_done",
               payload: {
                 runId,
                 orcaMessageId: m.id,
-                workerId: m.workerId ?? "",
+                orcaDispatchId: m.dispatchId ?? "",
                 outcome: m.outcome ?? "failed",
-                summary: m.summary,
+                summary: m.body ?? m.subject,
               },
               actor,
               correlation,
@@ -146,7 +182,7 @@ export class OrcaCoordinator {
             settleDispatch(this.ctx, {
               dispatchId: body.dispatchId,
               outcome: m.outcome === "succeeded" ? "succeeded" : "failed",
-              summary: m.summary,
+              summary: m.body ?? m.subject,
               causedBy: done.id,
             })
           )
@@ -158,9 +194,9 @@ export class OrcaCoordinator {
               payload: {
                 escalationId: `esc_${m.id}`,
                 dispatchId: body?.dispatchId,
-                from: body ? { kind: "soul", id: body.soulId } : { kind: "orca", id: m.workerId },
+                from: body ? { kind: "soul", id: body.soulId } : { kind: "orca", id: m.dispatchId },
                 level: "foreman",
-                reason: m.text ?? m.summary ?? "(no reason given)",
+                reason: m.body ?? m.subject ?? "(no reason given)",
                 orcaMessageId: m.id,
               },
               actor,
@@ -174,7 +210,7 @@ export class OrcaCoordinator {
               payload: {
                 questionId: `q_${m.id}`,
                 dispatchId: body?.dispatchId,
-                text: m.text ?? m.summary ?? "",
+                text: m.body ?? m.subject ?? "",
                 orcaMessageId: m.id,
               },
               actor,
@@ -204,24 +240,22 @@ export class OrcaCoordinator {
     const choice = this.disposition(
       (d.outcome ?? "failed") as "succeeded" | "failed" | "abandoned",
     );
+    let result: SettleResult;
     try {
-      await this.gateway.settleWorker(runId, body.orcaWorkerId, choice);
+      result = await this.gateway.settleWorker(body.orcaDispatchId, choice);
     } catch {
       return; // reconcile() will retry
     }
+    if (result.state === "pending") return; // Orca is still releasing; settleWorker is idempotent, retry later
+    const correlation = { runId, soulId: body.soulId };
     this.ctx.log.append([
-      choice === "release"
-        ? {
-            type: "body.released",
-            payload: { bodyId },
-            actor: { kind: "daemon" },
-            correlation: { runId, soulId: body.soulId },
-          }
+      result.state === "released"
+        ? { type: "body.released", payload: { bodyId }, actor: { kind: "daemon" }, correlation }
         : {
             type: "body.retained",
-            payload: { bodyId },
+            payload: { bodyId, reason: result.reason },
             actor: { kind: "daemon" },
-            correlation: { runId, soulId: body.soulId },
+            correlation,
           },
     ]);
   }
@@ -235,7 +269,7 @@ export class OrcaCoordinator {
     if (!(await this.pollOnce(runId, { wait: false }))) return;
     const workers = await this.gateway.listWorkers(runId);
     for (const w of workers) {
-      const body = getBodyByWorker(this.ctx.db, w.workerId);
+      const body = getBodyByOrcaDispatch(this.ctx.db, w.dispatchId);
       if (!body) continue;
       if (body.liveness !== w.liveness) {
         this.ctx.log.append([
@@ -278,6 +312,7 @@ export class OrcaCoordinator {
     if (!w) return;
     w.abort.abort();
     await w.done;
+    await this.flushAck(runId);
     this.watches.delete(runId);
   }
 

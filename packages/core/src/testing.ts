@@ -76,7 +76,7 @@ export function makeTown(rules: Rules = defaultRules) {
             bodyId,
             soulId,
             dispatchId: d.dispatchId,
-            orcaWorkerId: workerId,
+            orcaDispatchId: workerId,
             agent: "claude",
             worktree: "new-child",
           },

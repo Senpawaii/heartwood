@@ -36,10 +36,10 @@ const migrations: string[] = [
     compute_seconds REAL NOT NULL, cost_usd REAL, at TEXT NOT NULL, PRIMARY KEY (scope, soul_id));
 
   CREATE TABLE bodies (
-    body_id TEXT PRIMARY KEY, soul_id TEXT NOT NULL, dispatch_id TEXT NOT NULL, orca_worker_id TEXT NOT NULL,
+    body_id TEXT PRIMARY KEY, soul_id TEXT NOT NULL, dispatch_id TEXT NOT NULL, orca_dispatch_id TEXT NOT NULL, orca_terminal_handle TEXT,
     agent TEXT NOT NULL, model TEXT, worktree TEXT NOT NULL, liveness TEXT, disposition TEXT, spawned_at TEXT NOT NULL
   );
-  CREATE INDEX bodies_worker ON bodies(orca_worker_id);
+  CREATE INDEX bodies_worker ON bodies(orca_dispatch_id);
 
   CREATE TABLE warbands (
     warband_id TEXT PRIMARY KEY, objective TEXT NOT NULL, foreman_soul_id TEXT NOT NULL,
@@ -71,7 +71,7 @@ const migrations: string[] = [
     uses INTEGER NOT NULL, score REAL NOT NULL, PRIMARY KEY (seq, soul_id, skill_name));
 
   -- ephemeral: heartbeats are not events
-  CREATE TABLE worker_heartbeats (orca_worker_id TEXT PRIMARY KEY, at TEXT NOT NULL);
+  CREATE TABLE worker_heartbeats (orca_dispatch_id TEXT PRIMARY KEY, at TEXT NOT NULL);
 
   CREATE TABLE memories (
     memory_id TEXT PRIMARY KEY, layer TEXT NOT NULL, owner_soul_id TEXT, text TEXT NOT NULL, tags TEXT NOT NULL,
