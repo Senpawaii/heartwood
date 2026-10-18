@@ -1,7 +1,13 @@
 import type { HeartwoodEvent, PinnedSkill, SkillRank } from "@heartwood/protocol";
 import type { LabCtx } from "./context.js";
 import { DomainError } from "./errors.js";
-import { agentLabel, type Comparison, type Evidence } from "./lab.js";
+import {
+  agentLabel,
+  type BenchOptions,
+  type Comparison,
+  type Evidence,
+  type ProposeOptions,
+} from "./lab.js";
 import { deriveSkillRank } from "./rules.js";
 
 /** Absorb: the soul acquires a skill from the Lab, pinned by digest and kept in Heartwood's own store. */
@@ -75,8 +81,12 @@ export interface Analysis {
 }
 
 /** Analyze: benchmark a skill, record the evidence, and derive its rank from configurable thresholds. */
-export async function analyzeSkill(ctx: LabCtx, skill: PinnedSkill): Promise<Analysis> {
-  const evidence = await ctx.lab.analyze(skill);
+export async function analyzeSkill(
+  ctx: LabCtx,
+  skill: PinnedSkill,
+  opts: BenchOptions = {},
+): Promise<Analysis> {
+  const evidence = await ctx.lab.analyze(skill, opts);
   return { evidence, rank: recordEvidence(ctx, evidence).rank };
 }
 
@@ -90,11 +100,18 @@ export interface EvolveOutcome {
 /**
  * Evolve: analyze the current version, ask the Lab for a new one, and promote it only when a
  * benchmark comparison against the old version clears Heartwood's promotion gate and says "better".
+ * `opts.model` is what both versions are measured with; `opts.rewriterModel` writes the candidate.
  * Propagates LabUnavailableError when the Lab cannot benchmark or has no rewriter.
  */
-export async function evolveSkill(ctx: LabCtx, current: PinnedSkill): Promise<EvolveOutcome> {
-  const basis = await analyzeSkill(ctx, current);
-  const proposal = await ctx.lab.proposeVersion(current, basis.evidence);
+export async function evolveSkill(
+  ctx: LabCtx,
+  current: PinnedSkill,
+  opts: BenchOptions & ProposeOptions = {},
+): Promise<EvolveOutcome> {
+  const basis = await analyzeSkill(ctx, current, { model: opts.model });
+  const proposal = await ctx.lab.proposeVersion(current, basis.evidence, {
+    rewriterModel: opts.rewriterModel,
+  });
   const common = { name: current.name, from: current, to: proposal.skill };
   const events = ctx.log.append([
     {
@@ -106,7 +123,7 @@ export async function evolveSkill(ctx: LabCtx, current: PinnedSkill): Promise<Ev
   ]);
 
   const gate = ctx.rules.promotion;
-  const cmp = await ctx.lab.compare(proposal.skill, current, gate);
+  const cmp = await ctx.lab.compare(proposal.skill, current, gate, { model: opts.model });
   events.push(...recordEvidence(ctx, cmp.candidate).events);
 
   if (!(cmp.significant && cmp.verdict === "better")) {

@@ -6,7 +6,7 @@ import {
   NotFoundError,
   townSkillUsage,
 } from "@heartwood/core";
-import { PinnedSkill } from "@heartwood/protocol";
+import { AnalyzeRequest, EvolveRequest } from "@heartwood/protocol";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { DaemonContext } from "../daemon.js";
@@ -48,16 +48,24 @@ export function registerSkillRoutes(app: FastifyInstance, d: DaemonContext): voi
 
   /** Analyze: benchmark a skill and derive its rank. */
   app.post("/skills/analyze", async (req) => {
-    const b = PinnedSkill.parse(req.body);
-    const { evidence, rank } = await analyzeSkill(ctx, { name: b.name, digest: b.digest });
+    const b = AnalyzeRequest.parse(req.body);
+    const { evidence, rank } = await analyzeSkill(
+      ctx,
+      { name: b.name, digest: b.digest },
+      { model: b.model },
+    );
     // rank is absent when the benchmark was inconclusive (too few trials / too many infra errors)
     return { evidence, rank: rank ?? null };
   });
 
   /** Evolve: propose a new version and promote it only on proof from a comparison. */
   app.post("/skills/evolve", async (req) => {
-    const b = PinnedSkill.parse(req.body);
-    const out = await evolveSkill(ctx, { name: b.name, digest: b.digest });
+    const b = EvolveRequest.parse(req.body);
+    const out = await evolveSkill(
+      ctx,
+      { name: b.name, digest: b.digest },
+      { model: b.model, rewriterModel: b.rewriterModel },
+    );
     return { promoted: out.promoted, candidate: out.candidate, comparison: out.comparison };
   });
 }

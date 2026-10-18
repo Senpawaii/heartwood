@@ -11,7 +11,8 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "start": "tsx src/main.ts"
+    "start": "tsx src/main.ts",
+    "dev:demo": "tsx --env-file-if-exists=../../.env src/demo.ts"
   },
   "dependencies": {
     "@fastify/static": "^10.1.6",

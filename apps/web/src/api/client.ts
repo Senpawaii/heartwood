@@ -139,12 +139,21 @@ export function createClient(o: ClientOptions = {}) {
       persona: string;
       magiculesSpent?: number;
     }) => request("POST", "/souls", Ok, b),
-    /** Benchmarks a pinned skill. Takes minutes with a real agent. */
-    analyzeSkill: (name: string, digest: string) =>
-      request("POST", "/skills/analyze", AnalyzeResponse, { name, digest }),
-    /** Proposes a new version and promotes it only on proof. Takes minutes with a real agent. */
-    evolveSkill: (name: string, digest: string) =>
-      request("POST", "/skills/evolve", EvolveResponse, { name, digest }),
+    /** Benchmarks a pinned skill; `model` overrides the server's setting. Takes minutes with a real agent. */
+    analyzeSkill: (name: string, digest: string, o: { model?: string } = {}) =>
+      request("POST", "/skills/analyze", AnalyzeResponse, { name, digest, model: o.model }),
+    /** Proposes a new version, promoted only on proof. `model` measures, `rewriterModel` writes. Takes minutes. */
+    evolveSkill: (
+      name: string,
+      digest: string,
+      o: { model?: string; rewriterModel?: string } = {},
+    ) =>
+      request("POST", "/skills/evolve", EvolveResponse, {
+        name,
+        digest,
+        model: o.model,
+        rewriterModel: o.rewriterModel,
+      }),
     evolve: (id: string) => request("POST", `/souls/${enc(id)}/evolve`, Ok),
     absorb: (id: string, name: string) => request("POST", `/souls/${enc(id)}/skills`, Ok, { name }),
     saveMemoryMarkdown: (id: string, md: string) =>

@@ -53,6 +53,8 @@ class MarkerAgent implements AgentAdapter {
   readonly id = "marker-agent";
   private ready = new Set<string>();
   trials = 0;
+  /** The model each trial was asked to run with, in order. */
+  readonly models: (string | undefined)[] = [];
   async detect() {
     return { available: true, version: "1" };
   }
@@ -60,8 +62,9 @@ class MarkerAgent implements AgentAdapter {
     if ((await readFile(join(skill.dir, "SKILL.md"), "utf8")).includes("WRITE_OUT"))
       this.ready.add(ws.dir);
   }
-  async run(_req: RunRequest, ws: Workspace): Promise<RunResult> {
+  async run(req: RunRequest, ws: Workspace): Promise<RunResult> {
     this.trials++;
+    this.models.push(req.model);
     if (this.ready.has(ws.dir)) await writeFile(join(ws.dir, "out.txt"), "ok");
     return {
       status: "completed",
@@ -97,6 +100,10 @@ async function world(
   o: {
     agent?: AgentAdapter | null;
     rewriter?: SkillRewriter;
+    /** Makes the rewriter from the model chosen for it; takes precedence over `rewriter`. */
+    rewriterFor?: (choice: { model?: string }) => SkillRewriter;
+    model?: string;
+    rewriterModel?: string;
     body?: string;
     repeat?: number;
     rules?: Rules;
@@ -110,6 +117,7 @@ async function world(
   await writeFile(join(dir, "grimoire.bench.yaml"), SUITE);
   const store = new SkillStore(join(root, "store"));
   const results = new ResultStore(join(root, "results.db"));
+  const fixedRewriter = o.rewriter;
   const agent = o.agent === null ? undefined : (o.agent ?? new MarkerAgent());
   const lab = new GrimoireLab({
     sources: [dirSource(skills)],
@@ -117,7 +125,9 @@ async function world(
     results,
     outDir: join(root, "runs"),
     agent,
-    rewriter: o.rewriter,
+    rewriter: o.rewriterFor ?? (fixedRewriter ? () => fixedRewriter : undefined),
+    model: o.model,
+    rewriterModel: o.rewriterModel,
     repeat: o.repeat ?? 10,
   });
   const db = openDb();
@@ -402,5 +412,62 @@ describe("GrimoireLab: evolving a skill end to end", { timeout: 60_000 }, () => 
       DomainError,
     );
     expect(w.ctx.log.read({ types: ["skill.evolve_proposed"] })).toEqual([]);
+  });
+});
+
+describe("GrimoireLab: the model is chosen per call, with the Lab's setting as the fallback", () => {
+  it("benchmarks with the model the caller names, else the Lab's own, else none", async () => {
+    const agent = new MarkerAgent();
+    const w = await world({ agent, repeat: 2, model: "lab/default:low" });
+    const ref = await w.lab.resolve("tdd");
+
+    await w.lab.analyze(ref);
+    expect(new Set(agent.models)).toEqual(new Set(["lab/default:low"]));
+    agent.models.length = 0;
+
+    const named = await w.lab.analyze(ref, { model: "anthropic/claude-sonnet-5-5:high" });
+    expect(new Set(agent.models)).toEqual(new Set(["anthropic/claude-sonnet-5-5:high"]));
+    expect(named.skill.digest).toBe(ref.digest);
+
+    const bare = await world({ agent: new MarkerAgent(), repeat: 2 });
+    const bareAgent = bare.agent as MarkerAgent;
+    await bare.lab.analyze(await bare.lab.resolve("tdd"));
+    expect(new Set(bareAgent.models)).toEqual(new Set([undefined]));
+  });
+
+  it("evolve measures both versions with the chosen model and writes the candidate with the chosen rewriter model", async () => {
+    const agent = new MarkerAgent();
+    const made: (string | undefined)[] = [];
+    const w = await world({
+      agent,
+      repeat: 2,
+      rules: SMALL,
+      model: "lab/default:low",
+      rewriterModel: "lab/rewriter-default",
+      rewriterFor: ({ model }) => {
+        made.push(model);
+        return async (_skill, _basis, outDir) => {
+          await writeFile(join(outDir, "SKILL.md"), skillMd("WRITE_OUT then done.", "1.1.0"));
+          return { changelog: "x" };
+        };
+      },
+    });
+    const v1 = await w.lab.resolve("tdd");
+
+    await evolveSkill(w.ctx, v1, { model: "m/bench:high", rewriterModel: "m/writer:max" });
+    expect(made).toEqual(["m/writer:max"]);
+    expect(new Set(agent.models)).toEqual(new Set(["m/bench:high"]));
+
+    // naming nothing falls back to the Lab's settings, for both roles
+    made.length = 0;
+    agent.models.length = 0;
+    await w.lab
+      .proposeVersion(
+        await w.lab.resolve("tdd"),
+        (await analyzeSkill(w.ctx, await w.lab.resolve("tdd"))).evidence,
+      )
+      .catch(() => undefined);
+    expect(made).toEqual(["lab/rewriter-default"]);
+    expect(new Set(agent.models)).toEqual(new Set(["lab/default:low"]));
   });
 });

@@ -90,6 +90,30 @@ export const SkillCatalogResponse = z.object({
   problems: z.array(SourceProblem),
 });
 
+/**
+ * A model chosen for one action. Plain provider/model syntax with an optional `:level` effort suffix
+ * (`anthropic/claude-sonnet-5-5:high`); it ends up in an agent's argv, so no spaces or shell syntax.
+ */
+export const ModelSelector = z
+  .string()
+  .max(200)
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._/@+:-]*$/,
+    "a model id such as provider/model or provider/model:high",
+  );
+
+/** Benchmark one pinned skill. `model` is what it is measured with; unset means the server's setting. */
+export const AnalyzeRequest = z.object({
+  name: z.string().min(1),
+  digest: z.string().min(1),
+  model: ModelSelector.optional(),
+});
+export type AnalyzeRequest = z.infer<typeof AnalyzeRequest>;
+
+/** Propose a new version. `model` measures both versions; `rewriterModel` writes the candidate. */
+export const EvolveRequest = AnalyzeRequest.extend({ rewriterModel: ModelSelector.optional() });
+export type EvolveRequest = z.infer<typeof EvolveRequest>;
+
 /** Result of benchmarking a skill. `rank` is null when the run was inconclusive. */
 export const AnalyzeResponse = z.object({
   evidence: z.object({
@@ -172,6 +196,8 @@ export const Health = z.object({
   backend: BackendState,
   lastSeq: z.number(),
   watching: z.array(z.string()),
+  /** Present and true only when the daemon runs on fake data. */
+  demo: z.boolean().optional(),
 });
 export type Health = z.infer<typeof Health>;
 

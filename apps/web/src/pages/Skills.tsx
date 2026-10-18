@@ -1,6 +1,7 @@
 import type { SkillRef } from "@heartwood/protocol";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useClient, useSkillCatalog, useSkillRanks, useSkillUsage } from "../api/provider";
+import { ModelPicker, selectorOf, usePersistedChoice } from "../components/ModelPicker";
 import { SkillUsageTable } from "../components/SkillUsageTable";
 import { Async, Badge, Button, Card, Empty, ErrorNote, Table } from "../components/ui";
 import { describeAnalysis, describeEvolution } from "../format";
@@ -13,16 +14,25 @@ const rankStyle: Record<string, string> = {
 };
 
 /** One catalog skill with its benchmark actions. Both take minutes with a real agent, so each shows progress and keeps its result. */
-function CatalogRow({ skill }: { skill: SkillRef }) {
+function CatalogRow({
+  skill,
+  model,
+  rewriterModel,
+}: {
+  skill: SkillRef;
+  /** What to measure with and what writes the new version; unset means the server's settings. */
+  model?: string;
+  rewriterModel?: string;
+}) {
   const c = useClient();
   const qc = useQueryClient();
   const refresh = () => void qc.invalidateQueries({ queryKey: ["skillRanks"] });
   const analyze = useMutation({
-    mutationFn: () => c.analyzeSkill(skill.name, skill.digest),
+    mutationFn: () => c.analyzeSkill(skill.name, skill.digest, { model }),
     onSuccess: refresh,
   });
   const evolve = useMutation({
-    mutationFn: () => c.evolveSkill(skill.name, skill.digest),
+    mutationFn: () => c.evolveSkill(skill.name, skill.digest, { model, rewriterModel }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["skillCatalog"] }).then(refresh),
   });
   const busy = analyze.isPending || evolve.isPending;
@@ -65,6 +75,10 @@ function CatalogRow({ skill }: { skill: SkillRef }) {
 
 export function Skills() {
   const catalog = useSkillCatalog();
+  const [measure, setMeasure] = usePersistedChoice("measure");
+  const [rewrite, setRewrite] = usePersistedChoice("rewrite");
+  const measureWith = selectorOf(measure);
+  const rewriteWith = selectorOf(rewrite);
   const usage = useSkillUsage();
   const ranks = useSkillRanks();
   return (
@@ -74,6 +88,20 @@ export function Skills() {
         <Async q={catalog}>
           {(k) => (
             <div className="space-y-3">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <ModelPicker
+                  label="Measure with"
+                  hint="The model a skill is tested with. A rank is a fact about skill and model together."
+                  value={measure}
+                  onChange={setMeasure}
+                />
+                <ModelPicker
+                  label="Rewrite with (Evolve)"
+                  hint="The model that writes the new version. Independent of the one it is measured with."
+                  value={rewrite}
+                  onChange={setRewrite}
+                />
+              </div>
               {k.problems.map((p) => (
                 <p
                   key={p.source}
@@ -89,7 +117,12 @@ export function Skills() {
                 <Table head={["Skill", "Version", "Digest", "Source", "Benchmark"]}>
                   {/* keyed by name: a promotion changes the digest, and the row must keep showing its result */}
                   {k.skills.map((sk) => (
-                    <CatalogRow key={sk.name} skill={sk} />
+                    <CatalogRow
+                      key={sk.name}
+                      skill={sk}
+                      model={measureWith}
+                      rewriterModel={rewriteWith}
+                    />
                   ))}
                 </Table>
               )}

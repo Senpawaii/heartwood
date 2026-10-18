@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { PinnedSkill } from "@heartwood/protocol";
 import { NotFoundError } from "./errors.js";
 import {
+  type BenchOptions,
   type Comparison,
   DigestMismatchError,
   type Evidence,
@@ -10,6 +11,7 @@ import {
   type LoadedSkill,
   type PromotionGate,
   type ProposedVersion,
+  type ProposeOptions,
   type SkillRef,
   type SourceProblem,
 } from "./lab.js";
@@ -17,7 +19,11 @@ import {
 export const digestOf = (body: string): string =>
   `sha256:${createHash("sha256").update(body).digest("hex")}`;
 
-export type Rewriter = (skill: LoadedSkill, basis: Evidence) => { body: string; changelog: string };
+export type Rewriter = (
+  skill: LoadedSkill,
+  basis: Evidence,
+  opts: ProposeOptions,
+) => { body: string; changelog: string };
 
 export interface ScriptedResult {
   trials: number;
@@ -36,6 +42,9 @@ export class FakeLab implements LabPort {
   private results = new Map<string, ScriptedResult>();
   private descriptions = new Map<string, string>();
   readonly pinned = new Set<string>();
+  /** Which models each call was asked to use, so tests can see what reached the Lab. */
+  readonly calls: { op: "analyze" | "proposeVersion"; model?: string; rewriterModel?: string }[] =
+    [];
   readonly promotions: { candidate: PinnedSkill; replaces: PinnedSkill }[] = [];
   rewriter?: Rewriter;
   /** The agent and suite the next benchmarks report, so tests can measure one skill under several. */
@@ -107,13 +116,13 @@ export class FakeLab implements LabPort {
     return this.versions.get(ref.name)?.has(ref.digest) ?? false;
   }
 
-  private evidence(ref: PinnedSkill): Evidence {
+  private evidence(ref: PinnedSkill, model?: string): Evidence {
     const r = this.results.get(ref.digest) ?? { trials: 10, passes: 0, errors: 0, baselineRate: 0 };
     const countable = r.trials - r.errors;
     return {
       skill: { name: ref.name, digest: ref.digest },
       suiteDigest: `suite:${ref.name}:${this.suite}`,
-      agent: this.agent,
+      agent: model ? { ...this.agent, model } : this.agent,
       ranAt: new Date(0).toISOString(),
       resultRef: `fake:${ref.digest}`,
       trials: r.trials,
@@ -131,15 +140,21 @@ export class FakeLab implements LabPort {
     };
   }
 
-  async analyze(ref: PinnedSkill): Promise<Evidence> {
+  async analyze(ref: PinnedSkill, opts: BenchOptions = {}): Promise<Evidence> {
     await this.load(ref);
-    return this.evidence(ref);
+    this.calls.push({ op: "analyze", model: opts.model });
+    return this.evidence(ref, opts.model);
   }
 
-  async proposeVersion(ref: PinnedSkill, basis: Evidence): Promise<ProposedVersion> {
+  async proposeVersion(
+    ref: PinnedSkill,
+    basis: Evidence,
+    opts: ProposeOptions = {},
+  ): Promise<ProposedVersion> {
     if (!this.rewriter)
       throw new LabUnavailableError("proposeVersion: no skill rewriter configured in the Lab");
-    const { body, changelog } = this.rewriter(await this.load(ref), basis);
+    const { body, changelog } = this.rewriter(await this.load(ref), basis, opts);
+    this.calls.push({ op: "proposeVersion", rewriterModel: opts.rewriterModel });
     const next = this.addSkill(ref.name, body, this.descriptions.get(ref.name));
     // proposing must not move the "current" pointer onto an unpromoted version
     this.latest.set(ref.name, ref.digest);
@@ -150,8 +165,9 @@ export class FakeLab implements LabPort {
     candidate: PinnedSkill,
     baseline: PinnedSkill,
     gate: PromotionGate,
+    opts: BenchOptions = {},
   ): Promise<Comparison> {
-    const [c, b] = [await this.analyze(candidate), await this.analyze(baseline)];
+    const [c, b] = [await this.analyze(candidate, opts), await this.analyze(baseline, opts)];
     const cn = c.trials - c.errors;
     const bn = b.trials - b.errors;
     const delta = (cn === 0 ? 0 : c.passes / cn) - (bn === 0 ? 0 : b.passes / bn);

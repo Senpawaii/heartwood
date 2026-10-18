@@ -43,7 +43,9 @@ The character mechanics borrow vocabulary only; all names and lore are original.
 
 ![The skill catalog with Analyze and Evolve (results stay on the row), town-wide usage, and ranks by agent](docs/screenshots/skills.png)
 
-This screenshot comes from a demo daemon with scripted benchmark results; real runs are described in the section on benchmarks.
+![An evolution in progress, with the models picked for it: both buttons stay disabled until the benchmark finishes](docs/screenshots/skills-running.png)
+
+These screenshots come from `pnpm demo` (scripted benchmark results, no models); real runs are described in the section on benchmarks.
 
 More: [souls](docs/screenshots/souls.png), [inbox](docs/screenshots/inbox.png), [events](docs/screenshots/events.png) (an evolution from proposal to verdict).
 
@@ -58,6 +60,10 @@ Open **http://127.0.0.1:7777**. `pnpm start` builds the web UI and starts the da
 
 To change anything, copy `.env.example` to `.env` and edit it. `pnpm start` reads `.env` (any shell, any OS), so you never write `set` or `export`. A new Heartwood is empty: no souls, no skills, no benchmarks. Skills are only needed to try Analyze and Evolve.
 
+**Trying the UI without agents or models:** `pnpm demo` (same as `pnpm start`, but on fake data: an in-memory database, a fake worker backend, and scripted benchmarks that take a couple of seconds). It starts with a small town and four skills chosen to show every outcome of **Evolve**: one is promoted, one is kept because nothing measurable changed, one is refused as worse, and one has not been benchmarked yet. The sidebar says "demo data: nothing here is real". For UI work with hot reload, run `pnpm dev:demo` (demo daemon and Vite together; the UI is at http://localhost:5173). `HEARTWOOD_DEMO_DELAY_MS` (default 1500) sets how long each scripted benchmark takes.
+
+**Choosing models:** on the Skills page, **Measure with** is the model a skill is tested with and **Rewrite with** is the model that writes a new version during Evolve, each with an optional effort. They apply to the next Analyze or Evolve, are remembered in your browser, and an empty field uses the server setting below. The API takes the same choices as `model` (and `rewriterModel`) in the body of `POST /skills/analyze` and `/skills/evolve`.
+
 The variables (put them in `.env`, or set them in the environment):
 
 | Variable | Default | |
@@ -69,8 +75,8 @@ The variables (put them in `.env`, or set them in the environment):
 | `HEARTWOOD_SKILL_DIRS` | `grimoire/skills` | Skill catalog directories (path-delimiter separated), read-only |
 | `HEARTWOOD_DEFAULT_AGENT` | `omp` | Agent for dispatches that do not name one. Workers run as [Oh My Pi](https://omp.sh) (`omp`) with a Claude model, never as `claude` directly |
 | `HEARTWOOD_MAX_GROUPS` | `4` | Concurrent warbands watched (one long poll each) |
-| `HEARTWOOD_BENCH_AGENT`, `HEARTWOOD_BENCH_MODEL`, `HEARTWOOD_BENCH_REPEAT` | off | Benchmark agent (`omp`), its model with an effort suffix (`anthropic/claude-sonnet-5-5:low`), trials per arm |
-| `HEARTWOOD_REWRITER`, `HEARTWOOD_REWRITER_MODEL`, `HEARTWOOD_REWRITER_TIMEOUT_MS` | off | Skill version proposals: `omp` runs one headless omp (`--no-session --approval-mode yolo --no-skills`) in the staged candidate directory; model may carry an effort suffix. Not a sandbox |
+| `HEARTWOOD_BENCH_AGENT`, `HEARTWOOD_BENCH_MODEL`, `HEARTWOOD_BENCH_REPEAT` | off | Benchmark agent (`omp`), the fallback model when the request names none (a `:low`-style suffix sets effort), trials per arm |
+| `HEARTWOOD_REWRITER`, `HEARTWOOD_REWRITER_MODEL`, `HEARTWOOD_REWRITER_TIMEOUT_MS` | off | Skill version proposals: `omp` runs one headless omp (`--no-session --approval-mode yolo --no-skills`) in the staged candidate directory; the model is a fallback for requests that name none. Not a sandbox |
 | `HEARTWOOD_ORCA_BIN`, `HEARTWOOD_ORCA_COORDINATOR_WORKTREE`, `HEARTWOOD_ORCA_POLL_TIMEOUT_MS` | `orca`, `active`, `60000` | Orca adapter |
 
 If the backend cannot be opened or is incompatible, the daemon still starts in **degraded** mode (`backend.incompatible` is recorded, backend routes return 503); `POST /backend/connect` retries. Catalog, absorb (pin) and spec rendering work out of the box. **Benchmarks (analyze, compare) run only when `HEARTWOOD_BENCH_AGENT=omp`; version proposals also need `HEARTWOOD_REWRITER=omp`. Neither is configured by default, so `/skills/analyze` and `/skills/evolve` return 501** rather than fabricate results. With the agent set, the daemon refuses to start if the `omp` binary is not on PATH. Heartwood runs omp only, never `claude` directly, even though grimoire-lab also ships a `claude-code` adapter.

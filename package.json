@@ -11,7 +11,9 @@
     "start": "pnpm --filter @heartwood/web build && tsx --env-file-if-exists=.env packages/daemon/src/main.ts",
     "typecheck": "tsc -b && pnpm --filter @heartwood/web typecheck",
     "test": "vitest run",
-    "lint": "biome check ."
+    "lint": "biome check .",
+    "demo": "pnpm --filter @heartwood/web build && tsx --env-file-if-exists=.env packages/daemon/src/demo.ts",
+    "dev:demo": "pnpm --parallel --filter @heartwood/daemon --filter @heartwood/web run dev:demo"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",

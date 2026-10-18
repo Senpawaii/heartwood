@@ -63,6 +63,11 @@ function Layout() {
             <span className={`inline-block h-2 w-2 rounded-full ${dot[status]}`} /> stream {status}
           </div>
           <div>backend: {backend ?? "…"}</div>
+          {health.data?.demo && (
+            <div className="rounded bg-amber-100 px-1.5 py-1 text-amber-800">
+              demo data: nothing here is real
+            </div>
+          )}
         </div>
       </aside>
       <main className="min-w-0 flex-1 p-8">

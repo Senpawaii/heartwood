@@ -51,6 +51,8 @@ export interface DaemonDeps {
   townName?: string;
   /** Directory of the built web UI, served at /ui/. Omit to serve the API only. */
   webDir?: string;
+  /** Marks /health as demo data, so the UI can say that nothing it shows is real. */
+  demo?: boolean;
   /** Bearer token required on every request except /health and the UI shell. */
   token?: string;
   coordinator?: CoordinatorOptions;
@@ -196,6 +198,7 @@ export async function createDaemon(deps: DaemonDeps): Promise<Daemon> {
     backend: state,
     lastSeq: log.lastSeq(),
     watching: coordinator.watching,
+    ...(deps.demo ? { demo: true } : {}),
   }));
   app.post("/backend/connect", async () => connectBackend());
 

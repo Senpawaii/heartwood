@@ -27,6 +27,7 @@ import {
   splitFrontmatter,
 } from "@grimoire/core";
 import {
+  type BenchOptions,
   type Comparison,
   DigestMismatchError,
   DomainError,
@@ -37,6 +38,7 @@ import {
   NotFoundError,
   type PromotionGate,
   type ProposedVersion,
+  type ProposeOptions,
   type SkillRef,
   type SourceProblem,
   SourceUnavailableError,
@@ -63,10 +65,16 @@ export interface GrimoireLabOptions {
    * and `compare` fail with LabUnavailableError instead of pretending.
    */
   agent?: AgentAdapter;
-  /** Edits a staged candidate (an LLM-driven agent, a human script). Without one, `proposeVersion` fails with LabUnavailableError. */
-  rewriter?: SkillRewriter;
+  /**
+   * Makes the editor of a staged candidate (an LLM-driven agent, a human script) for one proposal, given the
+   * model chosen for it. Without one, `proposeVersion` fails with LabUnavailableError.
+   */
+  rewriter?: (choice: { model?: string }) => SkillRewriter;
   repeat?: number;
+  /** Model benchmarks run with unless the caller names one. */
   model?: string;
+  /** Model the rewriter uses unless the caller names one. */
+  rewriterModel?: string;
   /** Called whenever a catalog source fails, for logging. The failure is also kept in `sourceProblems()`. */
   onSourceProblem?: (problem: SourceProblem) => void;
 }
@@ -278,7 +286,7 @@ export class GrimoireLab implements LabPort {
     return blocks.join("\n\n");
   }
 
-  async analyze(ref: PinnedSkill): Promise<Evidence> {
+  async analyze(ref: PinnedSkill, opts: BenchOptions = {}): Promise<Evidence> {
     const adapter = this.requireAgent("analyze");
     const loaded = await this.open(ref);
     try {
@@ -290,7 +298,7 @@ export class GrimoireLab implements LabPort {
         outDir: this.o.outDir,
         store: this.o.results,
         repeat: this.o.repeat,
-        model: this.o.model,
+        model: opts.model ?? this.o.model,
       });
       return toEvidence(result, loaded.skill);
     } finally {
@@ -308,7 +316,11 @@ export class GrimoireLab implements LabPort {
     }
   }
 
-  async proposeVersion(ref: PinnedSkill, basis: Evidence): Promise<ProposedVersion> {
+  async proposeVersion(
+    ref: PinnedSkill,
+    basis: Evidence,
+    opts: ProposeOptions = {},
+  ): Promise<ProposedVersion> {
     if (!this.o.rewriter)
       throw new LabUnavailableError("proposeVersion: no skill rewriter is configured");
     if (!basis.resultRef.startsWith(REF_PREFIX))
@@ -322,7 +334,7 @@ export class GrimoireLab implements LabPort {
       const outDir = join(root, loaded.skill.name);
       await mkdir(root, { recursive: true });
       const proposal = await grimoireProposeVersion(loaded.skill, stored, {
-        rewriter: this.o.rewriter,
+        rewriter: this.o.rewriter({ model: opts.rewriterModel ?? this.o.rewriterModel }),
         outDir,
       });
       this.staging.skills.set(proposal.digest, proposal.skill);
@@ -343,6 +355,7 @@ export class GrimoireLab implements LabPort {
     candidate: PinnedSkill,
     baseline: PinnedSkill,
     gate: PromotionGate,
+    opts: BenchOptions = {},
   ): Promise<Comparison> {
     const adapter = this.requireAgent("compare");
     const cand = await this.open(candidate);
@@ -358,7 +371,7 @@ export class GrimoireLab implements LabPort {
         outDir: this.o.outDir,
         store: this.o.results,
         repeat: this.o.repeat,
-        model: this.o.model,
+        model: opts.model ?? this.o.model,
         baseline: true, // also measure no-skill, so the candidate can be ranked from the same run
       });
       // Heartwood's gate, not grimoire's defaults

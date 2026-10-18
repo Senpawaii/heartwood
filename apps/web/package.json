@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p .",
+    "dev:demo": "vite"
   },
   "dependencies": {
     "@heartwood/protocol": "workspace:*",
