@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { type AgentAdapter, dirSource, ResultStore } from "@grimoire/core";
 import { openDb, SqliteKv } from "@heartwood/core";
-import { GrimoireLab, OrcaBackend, SkillStore } from "@heartwood/integrations";
+import { createOmpRewriter, GrimoireLab, OrcaBackend, SkillStore } from "@heartwood/integrations";
 import { BenchAgentError, loadBenchAgent } from "./benchAgent.js";
 import { loadConfig } from "./config.js";
 import { createDaemon } from "./daemon.js";
@@ -16,7 +16,7 @@ mkdirSync(join(dataDir, "grimoire"), { recursive: true });
 const results = new ResultStore(join(dataDir, "grimoire", "results.db"));
 // Catalog reads, pinning and rendering always work. Benchmarks run only when HEARTWOOD_BENCH_AGENT names an
 // agent (a misconfiguration stops the daemon here, loudly); version proposals also need a rewriter, which is
-// not configured, so those answer 501 instead of faking results.
+// only configured with HEARTWOOD_REWRITER=omp, otherwise those answer 501 instead of faking results.
 let agent: AgentAdapter | undefined;
 try {
   agent = await loadBenchAgent(config.bench.agent);
@@ -29,6 +29,10 @@ const lab = new GrimoireLab({
   agent,
   model: config.bench.model,
   repeat: config.bench.repeat,
+  rewriter:
+    config.rewriter.agent === "omp"
+      ? createOmpRewriter({ model: config.rewriter.model, timeoutMs: config.rewriter.timeoutMs })
+      : undefined,
   sources: config.lab.skillDirs.map((d) => dirSource(resolve(d))),
   store: new SkillStore(join(dataDir, "skills")),
   results,

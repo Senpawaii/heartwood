@@ -96,3 +96,19 @@ describe("benchmark configuration", () => {
       expect(() => loadConfig({ HEARTWOOD_BENCH_REPEAT: bad })).toThrow();
   });
 });
+
+describe("rewriter configuration", () => {
+  it("is off by default and only accepts omp", () => {
+    expect(loadConfig({}).rewriter).toEqual({});
+    expect(
+      loadConfig({
+        HEARTWOOD_REWRITER: "omp",
+        HEARTWOOD_REWRITER_MODEL: "anthropic/claude-sonnet-5-5:high",
+      }).rewriter,
+    ).toEqual({
+      agent: "omp",
+      model: "anthropic/claude-sonnet-5-5:high",
+    });
+    expect(() => loadConfig({ HEARTWOOD_REWRITER: "claude" })).toThrow();
+  });
+});

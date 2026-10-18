@@ -32,6 +32,15 @@ export const ConfigSchema = z.object({
       repeat: z.coerce.number().int().positive().optional(),
     })
     .default({}),
+  /** Proposes new skill versions (evolve). `omp` runs one headless omp per proposal. Off by default. */
+  rewriter: z
+    .object({
+      agent: z.enum(["omp"]).optional(),
+      /** Model id, with an optional `:level` effort suffix. Default: omp's own. */
+      model: z.string().min(1).optional(),
+      timeoutMs: z.coerce.number().int().positive().optional(),
+    })
+    .default({}),
   orca: z
     .object({
       bin: z.string().optional(),
@@ -58,6 +67,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       agent: env.HEARTWOOD_BENCH_AGENT,
       model: env.HEARTWOOD_BENCH_MODEL,
       repeat: env.HEARTWOOD_BENCH_REPEAT,
+    },
+    rewriter: {
+      agent: env.HEARTWOOD_REWRITER,
+      model: env.HEARTWOOD_REWRITER_MODEL,
+      timeoutMs: env.HEARTWOOD_REWRITER_TIMEOUT_MS,
     },
     orca: {
       bin: env.HEARTWOOD_ORCA_BIN,
