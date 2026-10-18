@@ -184,3 +184,11 @@ refusal for bare names while one is down). Item 5 for grimoire 0.3.0: Heartwood 
 ## 9. Release 0.3.1 adopted
 
 Heartwood installs `@grimoire/core` and `@grimoire/adapters` 0.3.1 from the release tarballs, with sha512 integrity entries in the lockfile (the asset sha256 values from the release were checked against what GitHub serves). The lockfile holds exactly one `@grimoire/core` and no registry copy: Heartwood never installed the unrelated npm package of the same name. The optional-loading workaround is removed; `@grimoire/adapters` is a normal dependency of the daemon. `HEARTWOOD_BENCH_AGENT` accepts `omp` only.
+
+## 10. Findings from running 0.3.1 for real
+
+Measured with the omp adapter on Windows (10 trials per arm, `anthropic/claude-sonnet-5-5:low`). Heartwood fixed its own defects (see its changelog); this is what concerns grimoire-lab.
+
+1. **omp skill isolation works, filesystem isolation does not.** A control run shows plain omp listing the user's installed skills, and omp with the adapter's flags (`--no-skills`, `--no-rules`, `--no-extensions`) listing none. But the agent still has unrestricted file tools (`--approval-mode yolo`), and in 2 of 10 baseline trials of a task that said "in our house style" it ran `ls ~/.claude ~/.omp` and then read files inside the user's own skill folders (including a `report-writer.md` of an unrelated skill). Measurements can therefore depend on what happens to be installed on the machine, and private files can reach the model. We have not tested a fix. Options for you to weigh: restrict the tools through `RunRequest.tools`, or run each trial with the home directory pointed at an empty directory (omp needs its auth, so that may need a copy of just that file). Please tell us which you prefer and how to opt in.
+2. **A rewrite should not reuse the version label.** `proposeVersion` does not bump `version` unless told to. Heartwood now passes the next patch version; you may want the library default to be a bump, since an unchanged label for changed content makes `name@version` ambiguous in any consumer.
+3. Verified, no action: digests ignore `.DS_Store`, `Thumbs.db` and `desktop.ini`; CRLF and LF checkouts hash the same; the same folder has the identical digest on Windows and Linux; symlinks (file and directory) are ignored by the digest on Linux, so a skill must not rely on them.

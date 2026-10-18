@@ -29,7 +29,7 @@ import {
   SqliteEventLog,
 } from "@heartwood/core";
 import { afterEach, describe, expect, it } from "vitest";
-import { GrimoireLab } from "./lab.js";
+import { bumpPatch, GrimoireLab } from "./lab.js";
 import { SkillStore } from "./store.js";
 
 const SUITE = `suite: tdd-basic
@@ -469,5 +469,37 @@ describe("GrimoireLab: the model is chosen per call, with the Lab's setting as t
       .catch(() => undefined);
     expect(made).toEqual(["lab/rewriter-default"]);
     expect(new Set(agent.models)).toEqual(new Set(["lab/default:low"]));
+  });
+});
+
+describe("a rewritten skill gets a new version label", () => {
+  it("bumps the patch number, and leaves a missing or unusual version alone", () => {
+    expect(bumpPatch("1.0.0")).toBe("1.0.1");
+    expect(bumpPatch("2.9.9")).toBe("2.9.10");
+    expect(bumpPatch("0.1.0")).toBe("0.1.1");
+    for (const odd of [undefined, "", "1.0", "1", "1.0.0-rc.1", "v1.0.0", "1.0.x"])
+      expect(bumpPatch(odd), String(odd)).toBeUndefined();
+  });
+
+  it("a rewriter that only edits the body still yields a version that name@version can tell apart", async () => {
+    // like omp: it edits the staged SKILL.md in place and never touches the frontmatter
+    const editBodyOnly: SkillRewriter = async (_skill, _basis, outDir) => {
+      const file = join(outDir, "SKILL.md");
+      await writeFile(file, `${await readFile(file, "utf8")}\nWRITE_OUT then done.\n`);
+      return { changelog: "Teach the agent to write the file." };
+    };
+    const w = await world({ rewriter: editBodyOnly, repeat: 4, rules: SMALL });
+    const v1 = await w.lab.resolve("tdd");
+    expect(v1.version).toBe("1.0.0");
+
+    const out = await evolveSkill(w.ctx, v1);
+    expect(out.promoted).toBe(true);
+
+    const current = await w.lab.resolve("tdd");
+    expect(current.digest).toBe(out.candidate.digest);
+    expect(current.version).toBe("1.0.1");
+    // each label names exactly one content, so a pin by name@version cannot get the other one
+    expect((await w.lab.resolve("tdd@1.0.1")).digest).toBe(out.candidate.digest);
+    expect((await w.lab.resolve("tdd@1.0.0")).digest).toBe(v1.digest);
   });
 });
