@@ -24,6 +24,30 @@ describe("live events", () => {
     expect(queryKeysFor("hologram.projected")).toEqual([]);
   });
 
+  it("describes a skill evolution from proposal to verdict, with the evidence that decided it", () => {
+    const pin = (d: string) => ({ name: "greeter", digest: d });
+    const describe1 = (type: string, extra: object) => {
+      const e = parseLiveEvent(
+        frame(type, {
+          name: "greeter",
+          from: pin("sha256:aaaa111122223333"),
+          to: pin("sha256:bbbb444455556666"),
+          ...extra,
+        }),
+      );
+      return e && describeEvent(e);
+    };
+    expect(describe1("skill.evolve_proposed", { changelog: "State the requirement." })).toBe(
+      "greeter: new version sha256:bbbb4444 proposed: State the requirement.",
+    );
+    expect(describe1("skill.evolve_promoted", { comparisonRef: "grimoire:3" })).toBe(
+      "greeter: sha256:bbbb4444 replaces sha256:aaaa1111",
+    );
+    expect(describe1("skill.evolve_rejected", { reason: "verdict same (delta 0.000)" })).toBe(
+      "greeter: sha256:bbbb4444 not promoted: verdict same (delta 0.000)",
+    );
+  });
+
   it("parses known events and ignores unknown or malformed frames instead of crashing the stream", () => {
     const e = parseLiveEvent(frame("dispatch.settled", { dispatchId: "d1", outcome: "succeeded" }));
     expect(e?.type).toBe("dispatch.settled");

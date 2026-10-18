@@ -39,7 +39,9 @@ export function EventsPage() {
                 <span className="w-12 shrink-0 text-right text-bark-500">#{e.seq}</span>
                 <span className="w-16 shrink-0 font-sans text-bark-500">{timeAgo(e.at)}</span>
                 <span className="w-52 shrink-0 text-bark-700">{e.type}</span>
-                <span className="truncate font-sans text-bark-900">{describeEvent(e, nameOf)}</span>
+                <span className="min-w-0 break-words font-sans text-bark-900">
+                  {describeEvent(e, nameOf)}
+                </span>
               </li>
             ))}
           </ul>
