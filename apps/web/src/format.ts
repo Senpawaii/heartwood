@@ -40,6 +40,7 @@ export function describeAnalysis(r: AnalyzeResponse): string {
   ];
   if (e.errors > 0) parts.push(`${e.errors} errored`);
   if (e.vsBaseline) parts.push(`${points(e.vsBaseline.delta)} vs no skill`);
+  parts.push(`with ${e.agent.model ?? "the default model"}`);
   return parts.join(" · ");
 }
 

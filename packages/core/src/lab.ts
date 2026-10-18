@@ -66,6 +66,16 @@ export interface ProposedVersion {
   changelog: string;
 }
 
+/** What a person pressing Analyze or Evolve may choose. Unset means the Lab's own configured default. */
+export interface BenchOptions {
+  /** Model the skill is measured with; a `:level` suffix sets the effort (`anthropic/claude-sonnet-5-5:high`). */
+  model?: string;
+}
+export interface ProposeOptions {
+  /** Model that writes the new version, independent of the one the skill is measured with. */
+  rewriterModel?: string;
+}
+
 export interface LabPort {
   listSkills(): Promise<SkillRef[]>;
   /** Sources that failed their last attempt. Listing and resolving degrade around them instead of failing. */
@@ -78,11 +88,20 @@ export interface LabPort {
   load(ref: PinnedSkill): Promise<LoadedSkill>;
   verifyPin(ref: PinnedSkill): Promise<boolean>;
   /** Benchmark one skill (against no skill) on its own suite. Throws LabUnavailableError if the Lab cannot run benchmarks. */
-  analyze(ref: PinnedSkill): Promise<Evidence>;
+  analyze(ref: PinnedSkill, opts?: BenchOptions): Promise<Evidence>;
   /** Throws LabUnavailableError when the Lab has no rewriter configured. `basis` must come from `analyze`. */
-  proposeVersion(ref: PinnedSkill, basis: Evidence): Promise<ProposedVersion>;
+  proposeVersion(
+    ref: PinnedSkill,
+    basis: Evidence,
+    opts?: ProposeOptions,
+  ): Promise<ProposedVersion>;
   /** Benchmark a candidate against the version it would replace, on the baseline's suite. */
-  compare(candidate: PinnedSkill, baseline: PinnedSkill, gate: PromotionGate): Promise<Comparison>;
+  compare(
+    candidate: PinnedSkill,
+    baseline: PinnedSkill,
+    gate: PromotionGate,
+    opts?: BenchOptions,
+  ): Promise<Comparison>;
   /** Make a proposed candidate the current version of its skill. Heartwood calls this only after its own policy approved. */
   promote(candidate: PinnedSkill, replaces: PinnedSkill): Promise<SkillRef>;
   /** Text block to embed in a task spec for the given skills. */

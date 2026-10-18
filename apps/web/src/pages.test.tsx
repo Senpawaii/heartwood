@@ -5,9 +5,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { App } from "./App";
 import { type Client, createClient } from "./api/client";
 import { AppProviders } from "./api/provider";
+import { selectorOf } from "./components/ModelPicker";
 import { SkillUsageTable } from "./components/SkillUsageTable";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 type Routes = Record<string, unknown | ((req: { method: string; body: string | null }) => unknown)>;
 
@@ -466,6 +470,97 @@ describe("pages", () => {
       expect(screen.getByText(/Promoted sha256:99998888…/)).toBeTruthy();
     });
 
+    it("sends the model and effort picked in the UI, and nothing when none is picked", async () => {
+      const d = fakeDaemon({
+        ...base,
+        "GET /skills": { skills: [greeter], problems: [] },
+        "POST /skills/analyze": { evidence, rank: "common" },
+      });
+      mount(d, "/skills");
+      const analyze = await screen.findByRole("button", { name: "Analyze" });
+      fireEvent.click(analyze);
+      await screen.findByText(/trials passed/);
+      const bodyOf = (n: number) =>
+        JSON.parse(d.calls.filter((c) => c.path === "/skills/analyze")[n]?.body ?? "{}");
+      expect(bodyOf(0)).toEqual({ name: "greeter", digest: greeter.digest });
+
+      fireEvent.change(screen.getByLabelText("Measure with"), {
+        target: { value: "anthropic/claude-haiku-4-5" },
+      });
+      fireEvent.change(screen.getByLabelText("Measure with effort"), { target: { value: "high" } });
+      fireEvent.click(screen.getByRole("button", { name: "Analyze" }));
+      await waitFor(() =>
+        expect(d.calls.filter((c) => c.path === "/skills/analyze")).toHaveLength(2),
+      );
+      expect(bodyOf(1)).toEqual({
+        name: "greeter",
+        digest: greeter.digest,
+        model: "anthropic/claude-haiku-4-5:high",
+      });
+    });
+
+    it("Evolve sends both choices: what to measure with and what writes the new version", async () => {
+      const d = fakeDaemon({
+        ...base,
+        "GET /skills": { skills: [greeter], problems: [] },
+        "POST /skills/evolve": {
+          promoted: false,
+          candidate: { name: "greeter", digest: "sha256:1111222233334444" },
+          comparison: { delta: 0, verdict: "same", significant: false },
+        },
+      });
+      mount(d, "/skills");
+      fireEvent.change(await screen.findByLabelText("Measure with"), {
+        target: { value: "a/bench:low" },
+      });
+      fireEvent.change(screen.getByLabelText("Rewrite with (Evolve)"), {
+        target: { value: "b/writer" },
+      });
+      fireEvent.change(screen.getByLabelText("Rewrite with (Evolve) effort"), {
+        target: { value: "max" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Evolve" }));
+      await screen.findByText(/Kept the current version/);
+      const call = d.calls.find((c) => c.path === "/skills/evolve");
+      expect(JSON.parse(call?.body ?? "{}")).toEqual({
+        name: "greeter",
+        digest: greeter.digest,
+        model: "a/bench:low",
+        rewriterModel: "b/writer:max",
+      });
+    });
+
+    it("remembers the picked models after a reload", async () => {
+      const routes = { ...base, "GET /skills": { skills: [greeter], problems: [] } };
+      mount(fakeDaemon(routes), "/skills");
+      fireEvent.change(await screen.findByLabelText("Measure with"), {
+        target: { value: "a/kept" },
+      });
+      cleanup();
+      mount(fakeDaemon(routes), "/skills");
+      expect(((await screen.findByLabelText("Measure with")) as HTMLInputElement).value).toBe(
+        "a/kept",
+      );
+    });
+
+    it("ignores a damaged remembered choice instead of breaking the page", async () => {
+      localStorage.setItem("heartwood.model.measure", "{not json");
+      localStorage.setItem("heartwood.model.rewrite", JSON.stringify({ model: 5 }));
+      const d = fakeDaemon({ ...base, "GET /skills": { skills: [greeter], problems: [] } });
+      mount(d, "/skills");
+      expect(((await screen.findByLabelText("Measure with")) as HTMLInputElement).value).toBe("");
+    });
+
+    it("lets an effort be picked only for a model that does not already carry one", async () => {
+      mount(fakeDaemon({ ...base, "GET /skills": { skills: [greeter], problems: [] } }), "/skills");
+      const effort = (await screen.findByLabelText("Measure with effort")) as HTMLSelectElement;
+      expect(effort.disabled).toBe(true); // no model yet: an effort has nothing to attach to
+      fireEvent.change(screen.getByLabelText("Measure with"), { target: { value: "a/b" } });
+      expect(effort.disabled).toBe(false);
+      fireEvent.change(screen.getByLabelText("Measure with"), { target: { value: "a/b:xhigh" } });
+      expect(effort.disabled).toBe(true); // it names its own level
+    });
+
     it("disables both buttons while a benchmark runs, so one skill is never benchmarked twice at once", async () => {
       let finish: (v: unknown) => void = () => undefined;
       const pending = new Promise((resolve) => {
@@ -545,5 +640,15 @@ describe("pages", () => {
       </MemoryRouter>,
     );
     expect(await screen.findByText(/requires an access token/)).toBeTruthy();
+  });
+});
+
+describe("selectorOf", () => {
+  it("is undefined without a model, appends the effort, and leaves a model that names its own level alone", () => {
+    expect(selectorOf({ model: "", effort: "high" })).toBeUndefined();
+    expect(selectorOf({ model: "  ", effort: "" })).toBeUndefined();
+    expect(selectorOf({ model: " a/b ", effort: "" })).toBe("a/b");
+    expect(selectorOf({ model: "a/b", effort: "high" })).toBe("a/b:high");
+    expect(selectorOf({ model: "a/b:low", effort: "high" })).toBe("a/b:low");
   });
 });

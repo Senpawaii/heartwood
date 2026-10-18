@@ -62,7 +62,7 @@ describe("describeAnalysis", () => {
         },
         rank: "unique",
       }),
-    ).toBe("rank unique · 9/10 trials passed · +40 pts vs no skill");
+    ).toBe("rank unique · 9/10 trials passed · +40 pts vs no skill · with the default model");
   });
   it("shows a negative lift with a minus sign, and errors only when there are some", () => {
     expect(
@@ -77,6 +77,20 @@ describe("describeAnalysis", () => {
         },
         rank: null,
       }),
-    ).toBe("inconclusive, no rank · 2/10 trials passed · 1 errored · −30 pts vs no skill");
+    ).toBe(
+      "inconclusive, no rank · 2/10 trials passed · 1 errored · −30 pts vs no skill · with the default model",
+    );
+  });
+});
+
+describe("describeAnalysis with a chosen model", () => {
+  it("names the model the skill was measured with, effort included", () => {
+    const agent = { id: "omp", model: "anthropic/claude-sonnet-5-5:high" };
+    expect(
+      describeAnalysis({
+        evidence: { trials: 10, passes: 10, errors: 0, passRate: 1, agent },
+        rank: "ultimate",
+      }),
+    ).toBe("rank ultimate · 10/10 trials passed · with anthropic/claude-sonnet-5-5:high");
   });
 });

@@ -30,10 +30,11 @@ try {
 const lab = new GrimoireLab({
   agent,
   model: config.bench.model,
+  rewriterModel: config.rewriter.model,
   repeat: config.bench.repeat,
   rewriter:
     config.rewriter.agent === "omp"
-      ? createOmpRewriter({ model: config.rewriter.model, timeoutMs: config.rewriter.timeoutMs })
+      ? ({ model }) => createOmpRewriter({ model, timeoutMs: config.rewriter.timeoutMs })
       : undefined,
   sources: config.lab.skillDirs.map((d) => dirSource(resolve(d))),
   store: new SkillStore(join(dataDir, "skills")),
