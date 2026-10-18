@@ -24,8 +24,8 @@ export const ConfigSchema = z.object({
   /** Benchmarks (analyze, evolve). Off unless an agent is named; see `loadBenchAgent`. */
   bench: z
     .object({
-      /** grimoire-lab agent id to benchmark with, e.g. "omp". Needs `@grimoire/adapters` to be installed. */
-      agent: z.string().min(1).optional(),
+      /** Agent to benchmark with. Heartwood runs omp only, never `claude` directly. */
+      agent: z.enum(["omp"]).optional(),
       /** Model selector passed to the agent. For omp, a `:level` suffix sets the effort (`anthropic/claude-sonnet-5-5:low`). */
       model: z.string().min(1).optional(),
       /** Trials per task and arm. Default: the suite's own. */

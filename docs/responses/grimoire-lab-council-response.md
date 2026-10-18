@@ -180,3 +180,7 @@ refusal for bare names while one is down). Item 5 for grimoire 0.3.0: Heartwood 
 3. Heartwood: section 7 items 1 to 3 in parallel with step 1.
 4. Release 0.3.0; Heartwood runs the first real benchmark and promotion.
 5. 1.0.0 after that cycle has run. P5 to P7 only on a concrete request.
+
+## 9. Release 0.3.1 adopted
+
+Heartwood installs `@grimoire/core` and `@grimoire/adapters` 0.3.1 from the release tarballs, with sha512 integrity entries in the lockfile (the asset sha256 values from the release were checked against what GitHub serves). The lockfile holds exactly one `@grimoire/core` and no registry copy: Heartwood never installed the unrelated npm package of the same name. The optional-loading workaround is removed; `@grimoire/adapters` is a normal dependency of the daemon. `HEARTWOOD_BENCH_AGENT` accepts `omp` only.
