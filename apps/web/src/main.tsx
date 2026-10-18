@@ -9,7 +9,7 @@ const root = document.getElementById("root");
 if (!root) throw new Error("#root is missing");
 createRoot(root).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "")}>
       <AppProviders>
         <App />
       </AppProviders>

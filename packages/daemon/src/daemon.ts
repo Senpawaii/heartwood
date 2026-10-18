@@ -26,6 +26,7 @@ import { registerEventRoutes } from "./routes/events.js";
 import { registerSkillRoutes } from "./routes/skills.js";
 import { registerSoulRoutes } from "./routes/souls.js";
 import { registerWarbandRoutes } from "./routes/warbands.js";
+import { isPublicPath, registerWebUi, stripApiPrefix } from "./webUi.js";
 
 const TokenQuery = z.object({ token: z.string().optional() });
 
@@ -48,7 +49,9 @@ export interface DaemonDeps {
   lab: LabPort;
   rules?: Rules;
   townName?: string;
-  /** Bearer token required on every request except /health. */
+  /** Directory of the built web UI, served at /ui/. Omit to serve the API only. */
+  webDir?: string;
+  /** Bearer token required on every request except /health and the UI shell. */
   token?: string;
   coordinator?: CoordinatorOptions;
   /** Agent for dispatches that do not name one. Default `omp` (Oh My Pi); Claude models run through it. */
@@ -135,7 +138,10 @@ export async function createDaemon(deps: DaemonDeps): Promise<Daemon> {
     return state;
   };
 
-  const app = Fastify({ logger: deps.logger ?? false });
+  const app = Fastify({
+    logger: deps.logger ?? false,
+    rewriteUrl: (req) => stripApiPrefix(req.url ?? ""),
+  });
   const dctx: DaemonContext = {
     defaultAgent: deps.defaultAgent ?? DEFAULT_AGENT,
     ctx,
@@ -145,7 +151,7 @@ export async function createDaemon(deps: DaemonDeps): Promise<Daemon> {
   };
 
   app.addHook("onRequest", async (req) => {
-    if (!deps.token || req.url.split("?")[0] === "/health") return;
+    if (!deps.token || isPublicPath(req.url)) return;
     const header = req.headers.authorization?.replace(/^Bearer /i, "");
     // EventSource cannot set headers, so the SSE endpoint also accepts ?token=.
     const query = TokenQuery.safeParse(req.query).data?.token;
@@ -192,6 +198,8 @@ export async function createDaemon(deps: DaemonDeps): Promise<Daemon> {
     watching: coordinator.watching,
   }));
   app.post("/backend/connect", async () => connectBackend());
+
+  if (deps.webDir) await registerWebUi(app, deps.webDir);
 
   registerEventRoutes(app, dctx);
   registerSoulRoutes(app, dctx);

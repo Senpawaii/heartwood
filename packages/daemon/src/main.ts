@@ -1,11 +1,13 @@
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type AgentAdapter, dirSource, ResultStore } from "@grimoire/core";
 import { openDb, SqliteKv } from "@heartwood/core";
 import { createOmpRewriter, GrimoireLab, OrcaBackend, SkillStore } from "@heartwood/integrations";
 import { BenchAgentError, loadBenchAgent } from "./benchAgent.js";
 import { loadConfig } from "./config.js";
 import { createDaemon } from "./daemon.js";
+import { hasBuiltUi } from "./webUi.js";
 
 const config = loadConfig();
 const dataDir = resolve(config.dataDir);
@@ -43,7 +45,13 @@ const lab = new GrimoireLab({
     ),
 });
 
+const webDir = config.webDir
+  ? resolve(config.webDir)
+  : fileURLToPath(new URL("../../../apps/web/dist", import.meta.url));
+const serveUi = hasBuiltUi(webDir);
+
 const daemon = await createDaemon({
+  webDir: serveUi ? webDir : undefined,
   db,
   townName: config.townName,
   token: config.token,
@@ -68,6 +76,12 @@ if (
   daemon.app.log.warn("listening on a non-loopback address without HEARTWOOD_TOKEN");
 
 await daemon.app.listen({ host: config.host, port: config.port });
+if (serveUi)
+  daemon.app.log.info(`web UI: http://${config.host}:${config.port}/ (serving ${webDir})`);
+else
+  daemon.app.log.warn(
+    `web UI not built (no index.html in ${webDir}); run pnpm start, or pnpm build`,
+  );
 
 let stopping = false;
 const shutdown = async (signal: string) => {

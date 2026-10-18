@@ -6,6 +6,8 @@ export const ConfigSchema = z.object({
   townName: z.string().default("Heartwood"),
   host: z.string().default("127.0.0.1"),
   port: z.coerce.number().int().min(0).max(65535).default(7777),
+  /** Built web UI to serve at /ui/. Default: apps/web/dist of this repository, when it has been built. */
+  webDir: z.string().optional(),
   /** Bearer token required on every request except /health. Strongly recommended off loopback. */
   token: z.string().min(16).optional(),
   /** Agent for dispatches that do not name one. */
@@ -58,6 +60,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     townName: env.HEARTWOOD_TOWN_NAME,
     host: env.HEARTWOOD_HOST,
     port: env.HEARTWOOD_PORT,
+    webDir: env.HEARTWOOD_WEB_DIR,
     token: env.HEARTWOOD_TOKEN,
     defaultAgent: env.HEARTWOOD_DEFAULT_AGENT,
     maxConcurrentGroups: env.HEARTWOOD_MAX_GROUPS,

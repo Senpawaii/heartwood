@@ -47,17 +47,25 @@ This screenshot comes from a demo daemon with scripted benchmark results; real r
 
 More: [souls](docs/screenshots/souls.png), [inbox](docs/screenshots/inbox.png), [events](docs/screenshots/events.png) (an evolution from proposal to verdict).
 
-## Running the daemon
+## Running Heartwood
 
 ```
-pnpm --filter @heartwood/daemon start
+pnpm install
+pnpm start
 ```
+
+Open **http://127.0.0.1:7777**. `pnpm start` builds the web UI and starts the daemon, which serves the UI at `/ui/` and the JSON API at the root and under `/api`. One process, one URL, no terminal of its own needed beyond the one you start it from.
+
+To change anything, copy `.env.example` to `.env` and edit it. `pnpm start` reads `.env` (any shell, any OS), so you never write `set` or `export`. A new Heartwood is empty: no souls, no skills, no benchmarks. Skills are only needed to try Analyze and Evolve.
+
+The variables (put them in `.env`, or set them in the environment):
 
 | Variable | Default | |
 |---|---|---|
 | `HEARTWOOD_DATA_DIR` | `.heartwood` | SQLite database (event log, projections, adapter state) |
 | `HEARTWOOD_HOST` / `HEARTWOOD_PORT` | `127.0.0.1` / `7777` | |
-| `HEARTWOOD_TOKEN` | unset | Bearer token (≥16 chars) required on everything except `/health`; SSE also accepts `?token=`. Set it before listening off loopback. |
+| `HEARTWOOD_WEB_DIR` | `apps/web/dist` | Built UI to serve. Skipped, with a warning, if it has no `index.html` |
+| `HEARTWOOD_TOKEN` | unset | Bearer token (≥16 chars) required on everything except `/health` and the UI shell (so the page can load and ask for it under **Settings**); SSE also accepts `?token=`. Set it before listening off loopback. |
 | `HEARTWOOD_SKILL_DIRS` | `grimoire/skills` | Skill catalog directories (path-delimiter separated), read-only |
 | `HEARTWOOD_DEFAULT_AGENT` | `omp` | Agent for dispatches that do not name one. Workers run as [Oh My Pi](https://omp.sh) (`omp`) with a Claude model, never as `claude` directly |
 | `HEARTWOOD_MAX_GROUPS` | `4` | Concurrent warbands watched (one long poll each) |
@@ -76,15 +84,11 @@ If the backend cannot be opened or is incompatible, the daemon still starts in *
 - `GET /skills` (with `problems`), `GET /skills/usage|ranks` (one row per skill digest, suite and agent), `POST /souls/:id/skills` (absorb), `POST /skills/analyze|evolve`, `GET /souls/:id/skills/:skill/proficiency`
 - `GET|POST /warbands`, `GET /warbands/:id`, `POST /warbands/:id/dispatches|disband`, `POST /questions/:id/answer`, `POST /escalations/:id/resolve`
 
-Also: `GET /town` (counts, budget) and `GET /inbox` (unanswered questions, unresolved escalations). Not wired yet: the scheduled reflection pass (needs an LLM-backed `Reflector`); the daemon does not serve the built UI (use the Vite dev server/proxy).
+Also: `GET /town` (counts, budget) and `GET /inbox` (unanswered questions, unresolved escalations). Not wired yet: the scheduled reflection pass (needs an LLM-backed `Reflector`).
 
-## Running the web UI
+## The web UI
 
-```
-pnpm --filter @heartwood/web dev        # http://localhost:5173, proxies /api to the daemon
-```
-
-`HEARTWOOD_DAEMON_URL` points the dev proxy elsewhere (default `http://127.0.0.1:7777`; the daemon's default port is 7777). If the daemon has a token, enter it under **Settings**. Every response is validated against the shared schemas in `@heartwood/protocol`, and the daemon has contract tests against the same schemas. Skill usage is labelled **injected, not verified** because it counts injected-and-settled tasks, not transcript-verified use.
+Served by the daemon (above). To work on the UI with hot reload, run `pnpm start` in one terminal and `pnpm --filter @heartwood/web dev` in another (http://localhost:5173, proxies `/api` to the daemon; `HEARTWOOD_DAEMON_URL` points the proxy elsewhere). If the daemon has a token, enter it under **Settings**. Every response is validated against the shared schemas in `@heartwood/protocol`, and the daemon has contract tests against the same schemas. Skill usage is labelled **injected, not verified** because it counts injected-and-settled tasks, not transcript-verified use.
 
 ## Develop
 

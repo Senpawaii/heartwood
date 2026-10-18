@@ -25,6 +25,7 @@ export async function boot(
     backend?: WorkerBackend;
     lab?: LabPort;
     token?: string;
+    webDir?: string;
     maxGroups?: number;
     defaultAgent?: string;
     db?: Db;
@@ -38,6 +39,7 @@ export async function boot(
     backend,
     lab,
     token: o.token,
+    webDir: o.webDir,
     defaultAgent: o.defaultAgent,
     coordinator: {
       maxConcurrentGroups: o.maxGroups ?? 4,
