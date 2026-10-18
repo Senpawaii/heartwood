@@ -21,6 +21,17 @@ export const ConfigSchema = z.object({
         .transform((s) => (s ? s.split(delimiter).filter(Boolean) : ["grimoire/skills"])),
     })
     .default({ skillDirs: ["grimoire/skills"] }),
+  /** Benchmarks (analyze, evolve). Off unless an agent is named; see `loadBenchAgent`. */
+  bench: z
+    .object({
+      /** grimoire-lab agent id to benchmark with, e.g. "omp". Needs `@grimoire/adapters` to be installed. */
+      agent: z.string().min(1).optional(),
+      /** Model selector passed to the agent. For omp, a `:level` suffix sets the effort (`anthropic/claude-sonnet-5-5:low`). */
+      model: z.string().min(1).optional(),
+      /** Trials per task and arm. Default: the suite's own. */
+      repeat: z.coerce.number().int().positive().optional(),
+    })
+    .default({}),
   orca: z
     .object({
       bin: z.string().optional(),
@@ -43,6 +54,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxConcurrentGroups: env.HEARTWOOD_MAX_GROUPS,
     logLevel: env.HEARTWOOD_LOG_LEVEL,
     lab: { skillDirs: env.HEARTWOOD_SKILL_DIRS },
+    bench: {
+      agent: env.HEARTWOOD_BENCH_AGENT,
+      model: env.HEARTWOOD_BENCH_MODEL,
+      repeat: env.HEARTWOOD_BENCH_REPEAT,
+    },
     orca: {
       bin: env.HEARTWOOD_ORCA_BIN,
       coordinatorWorktree: env.HEARTWOOD_ORCA_COORDINATOR_WORKTREE,
