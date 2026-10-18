@@ -104,6 +104,15 @@ function translate(err: unknown): never {
  * The Lab over grimoire-lab as a library. Measurements come from `@grimoire/core`; every decision
  * (what a rank is, whether a version is promoted) stays in Heartwood.
  */
+/**
+ * The version a rewritten skill gets: the patch number plus one (`1.0.9` becomes `1.0.10`). A version that is
+ * absent or not plain `x.y.z` is left alone (undefined), because guessing a label for it would be wrong.
+ */
+export function bumpPatch(version: string | undefined): string | undefined {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(version ?? "");
+  return m ? `${m[1]}.${m[2]}.${Number(m[3]) + 1}` : undefined;
+}
+
 export class GrimoireLab implements LabPort {
   private readonly staging = new Staging();
   private readonly stagedDirs: string[] = [];
@@ -197,7 +206,10 @@ export class GrimoireLab implements LabPort {
         if (hit) return this.toRef(hit);
       }
     }
-    const listings = (await Promise.all(this.sources.map((s) => s.list()))).flat();
+    // Heartwood's store holds promoted versions, which a catalog may not (yet) list. A bare name already
+    // consulted it above; an exact name@version or digest must look there too, or a promoted version cannot be pinned.
+    const searched = isBareName ? this.sources : [this.o.store, ...this.sources];
+    const listings = (await Promise.all(searched.map((s) => s.list()))).flat();
     const down = [...this.problems.values()].filter((p) => p.operation === "list");
     // A bare name is only unambiguous if every source was heard from; a digest or name@version is exact.
     if (isBareName && down.length > 0)
@@ -205,7 +217,7 @@ export class GrimoireLab implements LabPort {
         `cannot resolve "${name}" while ${down.map((p) => `${p.source} is unavailable (${p.message})`).join("; ")}: it might be ambiguous. Use name@version or a digest, or retry`,
       );
     try {
-      const ref = await resolveSkill(name, this.sources);
+      const ref = await resolveSkill(name, searched);
       const listing = listings.find((l) => l.digest === ref.digest && l.name === ref.name);
       return {
         name: ref.name,
@@ -336,6 +348,8 @@ export class GrimoireLab implements LabPort {
       const proposal = await grimoireProposeVersion(loaded.skill, stored, {
         rewriter: this.o.rewriter({ model: opts.rewriterModel ?? this.o.rewriterModel }),
         outDir,
+        // a new content needs a new label, or name@version would name two different things
+        version: bumpPatch(loaded.skill.version),
       });
       this.staging.skills.set(proposal.digest, proposal.skill);
       return {

@@ -155,7 +155,13 @@ export function Skills() {
                           : "recorded before suites were tracked"
                       }
                     >
-                      {k.agent || "unknown"}
+                      <div>{k.agent || "unknown"}</div>
+                      {/* the same skill under another suite is another measurement; say which */}
+                      <div className="text-bark-500">
+                        {k.suiteDigest
+                          ? `suite ${k.suiteDigest.slice(7, 15)}`
+                          : "suite not recorded"}
+                      </div>
                     </td>
                     <td className="px-2 py-2 font-mono text-xs text-bark-500" title={k.digest}>
                       {k.digest.slice(0, 15)}…

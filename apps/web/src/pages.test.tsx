@@ -627,6 +627,35 @@ describe("pages", () => {
     });
   });
 
+  it("tells apart ranks of one skill and agent that were measured on different suites", async () => {
+    const row = (suiteDigest: string, rank: string) => ({
+      name: "summarizer",
+      digest: "sha256:abcdef0123456789",
+      suiteDigest,
+      agent: "omp@18.5.1 anthropic/claude-sonnet-5-5:low",
+      rank,
+      score: 0,
+      thresholdsVersion: "default-2",
+    });
+    const d = fakeDaemon({
+      "GET /health": ready,
+      "GET /inbox": inbox,
+      "GET /skills": { skills: [], problems: [] },
+      "GET /skills/usage": { usage: [] },
+      "GET /skills/ranks": {
+        ranks: [
+          row("sha256:1f547c6dAAAA", "common"),
+          row("sha256:c379f2a4BBBB", "common"),
+          row("", "common"),
+        ],
+      },
+    });
+    mount(d, "/skills");
+    expect(await screen.findByText("suite 1f547c6d")).toBeTruthy();
+    expect(screen.getByText("suite c379f2a4")).toBeTruthy();
+    expect(screen.getByText("suite not recorded")).toBeTruthy();
+  });
+
   it("shows a token hint when the daemon answers 401", async () => {
     const fetchFn = (async () =>
       new Response(JSON.stringify({ error: "unauthorized", message: "missing or invalid token" }), {
