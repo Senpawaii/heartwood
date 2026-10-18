@@ -192,7 +192,7 @@ describe("warbands and dispatch", () => {
       name: string;
     };
     expect(input).toMatchObject({
-      agent: "claude",
+      agent: "omp", // the daemon default; Heartwood runs Claude models through omp, never claude directly
       model: "opus",
       effort: "high",
       placement: "new-child",
@@ -235,6 +235,28 @@ describe("warbands and dispatch", () => {
     const series = (await json(b.app, "GET", `/souls/${t.worker}/skills/tdd/proficiency`)).body
       .series;
     expect(series).toHaveLength(1);
+  });
+
+  it("runs workers as omp by default, honours a configured default, and lets a request override it", async () => {
+    const agentsUsed = async (b: Booted, body: object = {}) => {
+      const t = await seedTown(b);
+      const wb = await formWarband(b, t.foreman, [t.worker]);
+      await json(
+        b.app,
+        "POST",
+        `/warbands/${wb.warbandId}/dispatches`,
+        dispatchBody(t.worker, body),
+      );
+      return b.backend.calls
+        .filter((c) => c.method === "startWorker")
+        .map((c) => (c.args[1] as { agent: string }).agent);
+    };
+    expect(await agentsUsed(await boot())).toEqual(["omp"]);
+    expect(await agentsUsed(await boot({ defaultAgent: "codex" }))).toEqual(["codex"]);
+    expect(await agentsUsed(await boot(), { agent: "codex" })).toEqual(["codex"]);
+    const b = await boot();
+    await agentsUsed(b);
+    expect(payloads(b.daemon.ctx.log, "body.spawned")[0]?.agent).toBe("omp");
   });
 
   it("refuses dispatches for non-members, unknown souls and inactive warbands", async () => {

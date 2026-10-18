@@ -488,3 +488,218 @@ describe("OrcaBackend commands", () => {
     expect(await be(runner).readWorker("d")).toEqual({ text: "a\nb", cursor: "c9" });
   });
 });
+
+// Orca 1.4.200's real refusal (captured), raised before anything is created.
+const refusedModel = () =>
+  fail("invalid_argument", "Agent omp does not support launch-time model selection.");
+const started = (dispatchId: string) =>
+  ok({
+    taskId: "task_1",
+    dispatchId,
+    state: "ready",
+    effects: [{ kind: "terminal", role: "agent", id: "term_x" }],
+  });
+const terminalCreated = (handle: string) => ok({ terminal: { handle } });
+const MODEL = "anthropic/claude-sonnet-5-5";
+
+describe("OrcaBackend: model and effort for omp (Claude through Oh My Pi)", () => {
+  const be = (runner: OrcaRunner, identity = new MemoryKv()) => {
+    identity.set("group:run_1", "term_s");
+    return { identity, backend: new OrcaBackend({ runner, identity }) };
+  };
+  const input = {
+    spec: "do it",
+    agent: "omp",
+    model: MODEL,
+    effort: "high",
+    placement: "current",
+    name: "Oakhand",
+  };
+
+  it("folds effort into the model id for omp, because Orca has no omp effort flag", async () => {
+    const { calls, runner } = scripted(started("ctx_1"));
+    await be(runner).backend.startWorker("run_1", input);
+    const argv = calls[0] ?? [];
+    expect(argv).toContain("--agent");
+    expect(argv[argv.indexOf("--model") + 1]).toBe(`${MODEL}:high`);
+    expect(argv).not.toContain("--effort");
+  });
+
+  it("agents Orca handles natively keep separate --model and --effort flags", async () => {
+    const { calls, runner } = scripted(started("ctx_1"));
+    await be(runner).backend.startWorker("run_1", {
+      ...input,
+      agent: "codex",
+      model: "gpt-5",
+      effort: "high",
+    });
+    const argv = calls[0] ?? [];
+    expect(argv[argv.indexOf("--model") + 1]).toBe("gpt-5");
+    expect(argv[argv.indexOf("--effort") + 1]).toBe("high");
+  });
+
+  it("sends --name only when the worker creates a new worktree (Orca rejects it otherwise)", async () => {
+    const a = scripted(started("ctx_1"), started("ctx_2"));
+    const { backend } = be(a.runner);
+    await backend.startWorker("run_1", { ...input, placement: "current" });
+    await backend.startWorker("run_1", { ...input, placement: "new-child" });
+    expect(a.calls[0]).not.toContain("--name");
+    expect(a.calls[1]).toContain("--name");
+  });
+
+  it("with no model, omp runs with whatever model omp is configured with", async () => {
+    const { calls, runner } = scripted(started("ctx_1"));
+    await be(runner).backend.startWorker("run_1", {
+      spec: "x",
+      agent: "omp",
+      placement: "current",
+    });
+    expect(calls[0]).not.toContain("--model");
+    expect(calls[0]).not.toContain("--effort");
+  });
+
+  it("rejects model ids and efforts omp or the shell must never see, before calling Orca", async () => {
+    const { calls, runner } = scripted();
+    const { backend } = be(runner);
+    const bad = (o: object) => backend.startWorker("run_1", { ...input, ...o }).catch((e) => e);
+    expect(await bad({ model: "opus; calc.exe" })).toMatchObject({ code: "bad_request" });
+    expect(await bad({ model: "opus && echo" })).toMatchObject({ code: "bad_request" });
+    expect(await bad({ model: "$(whoami)" })).toMatchObject({ code: "bad_request" });
+    expect(await bad({ model: 'a"b' })).toMatchObject({ code: "bad_request" });
+    expect(await bad({ effort: "turbo" })).toMatchObject({ code: "bad_request" });
+    expect(await bad({ model: `${MODEL}:low`, effort: "high" })).toMatchObject({
+      code: "bad_request",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  describe("on an Orca that refuses a launch-time model (1.4.200)", () => {
+    it("starts omp itself in an Orca terminal with the model:effort, then hands that terminal to worker-start", async () => {
+      const { calls, runner } = scripted(
+        refusedModel(),
+        terminalCreated("term_w"),
+        started("ctx_9"),
+      );
+      const w = await be(runner).backend.startWorker("run_1", input);
+
+      expect(w).toMatchObject({ workerRef: "ctx_9", locator: "term_w" });
+      expect(calls[1]).toEqual([
+        "terminal",
+        "create",
+        "--worktree",
+        "current",
+        "--title",
+        "heartwood: Oakhand",
+        "--command",
+        `omp --model ${MODEL}:high`,
+        "--json",
+      ]);
+      const handoff = calls[2] ?? [];
+      expect(handoff[handoff.indexOf("--terminal") + 1]).toBe("term_w");
+      for (const flag of ["--agent", "--model", "--effort", "--name"])
+        expect(handoff).not.toContain(flag);
+    });
+
+    it("closes the terminal it started when the worker is released, which Orca will not do for it", async () => {
+      const a = scripted(
+        refusedModel(),
+        terminalCreated("term_w"),
+        started("ctx_9"),
+        ok({ dispatchId: "ctx_9", state: "retained", reason: "external_terminal" }),
+        ok({ close: {} }),
+      );
+      const { backend, identity } = be(a.runner);
+      await backend.startWorker("run_1", input);
+      expect(identity.get("worker:ctx_9")).toBe("term_w");
+
+      expect(await backend.settleWorker("ctx_9", "release")).toEqual({ state: "released" });
+      expect(a.calls.at(-1)).toEqual(["terminal", "close", "--terminal", "term_w", "--json"]);
+      expect(identity.get("worker:ctx_9")).toBeUndefined();
+    });
+
+    it("a retained worker keeps its terminal open", async () => {
+      const a = scripted(
+        refusedModel(),
+        terminalCreated("term_w"),
+        started("ctx_9"),
+        ok({ dispatchId: "ctx_9", state: "retained", reason: "external_terminal" }),
+      );
+      const { backend, identity } = be(a.runner);
+      await backend.startWorker("run_1", input);
+      expect(await backend.settleWorker("ctx_9", "retain")).toEqual({
+        state: "retained",
+        reason: "external_terminal",
+      });
+      expect(a.calls.some((c) => c[1] === "close")).toBe(false);
+      expect(identity.get("worker:ctx_9")).toBe("term_w");
+    });
+
+    it("releasing after a restart still closes the terminal, because the mapping is durable", async () => {
+      const identity = new MemoryKv();
+      identity.set("worker:ctx_9", "term_w");
+      const a = scripted(
+        ok({ dispatchId: "ctx_9", state: "retained", reason: "external_terminal" }),
+        ok({ close: {} }),
+      );
+      expect(
+        await new OrcaBackend({ runner: a.runner, identity }).settleWorker("ctx_9", "release"),
+      ).toEqual({ state: "released" });
+      expect(a.calls[1]).toContain("term_w");
+    });
+
+    it("does not leak the terminal when worker-start then fails", async () => {
+      const a = scripted(
+        refusedModel(),
+        terminalCreated("term_w"),
+        fail("worker_start_failed", "no"),
+        ok({ close: {} }),
+      );
+      const err = await be(a.runner)
+        .backend.startWorker("run_1", input)
+        .catch((e) => e);
+      expect(err).toBeInstanceOf(WorkerStartError);
+      expect(a.calls.at(-1)).toEqual(["terminal", "close", "--terminal", "term_w", "--json"]);
+    });
+
+    it("cannot do it for a new worktree, and says so without creating anything", async () => {
+      for (const placement of ["new-child", "new-top-level"]) {
+        const a = scripted(refusedModel());
+        const err = await be(a.runner)
+          .backend.startWorker("run_1", { ...input, placement })
+          .catch((e) => e);
+        expect(err).toMatchObject({ code: "model_requires_existing_worktree" });
+        expect(a.calls).toHaveLength(1); // only the refused attempt
+      }
+    });
+
+    it("does not fall back on any other failure", async () => {
+      const a = scripted(fail("worker_start_failed", "terminal did not start"));
+      await expect(be(a.runner).backend.startWorker("run_1", input)).rejects.toMatchObject({
+        code: "worker_start_failed",
+      });
+      expect(a.calls).toHaveLength(1);
+    });
+
+    it("does not fall back when no model was asked for", async () => {
+      const a = scripted(refusedModel());
+      await expect(
+        be(a.runner).backend.startWorker("run_1", {
+          spec: "x",
+          agent: "omp",
+          placement: "current",
+        }),
+      ).rejects.toBeInstanceOf(WorkerStartError);
+      expect(a.calls).toHaveLength(1);
+    });
+  });
+
+  describe("on an Orca that accepts it (the OMP fix)", () => {
+    it("never starts a terminal itself, and release is Orca's", async () => {
+      const a = scripted(started("ctx_1"), ok({ dispatchId: "ctx_1", state: "released" }));
+      const { backend } = be(a.runner);
+      await backend.startWorker("run_1", input);
+      expect(await backend.settleWorker("ctx_1", "release")).toEqual({ state: "released" });
+      expect(a.calls.some((c) => c[0] === "terminal")).toBe(false);
+    });
+  });
+});

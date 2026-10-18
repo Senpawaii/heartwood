@@ -21,7 +21,14 @@ export interface Booted {
 }
 
 export async function boot(
-  o: { backend?: WorkerBackend; lab?: LabPort; token?: string; maxGroups?: number; db?: Db } = {},
+  o: {
+    backend?: WorkerBackend;
+    lab?: LabPort;
+    token?: string;
+    maxGroups?: number;
+    defaultAgent?: string;
+    db?: Db;
+  } = {},
 ): Promise<Booted> {
   const db: Db = o.db ?? openDb();
   const backend = (o.backend ?? new FakeBackend()) as FakeBackend;
@@ -31,6 +38,7 @@ export async function boot(
     backend,
     lab,
     token: o.token,
+    defaultAgent: o.defaultAgent,
     coordinator: {
       maxConcurrentGroups: o.maxGroups ?? 4,
       livenessIntervalMs: 1e9,

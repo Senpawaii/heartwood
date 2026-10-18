@@ -33,6 +33,55 @@ export interface OrcaBackendOptions {
 }
 
 const GROUP_KEY = "group:";
+/** Key of a terminal this adapter started itself for one worker (so it can close it on release). */
+const WORKER_KEY = "worker:";
+
+/** Agents that take reasoning effort as a `:level` suffix on the model id instead of a separate flag. */
+const EFFORT_AS_MODEL_SUFFIX = new Set(["omp"]);
+const THINKING_LEVELS = new Set([
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "auto",
+]);
+/**
+ * A model id is typed into a terminal when the adapter starts the agent itself, so it must be
+ * plain: provider/model ids, versions, `@`-routing and a `:level` suffix, never shell syntax.
+ */
+const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._/@+:-]*$/;
+
+const createsWorktree = (placement: string) =>
+  placement === "new-child" || placement === "new-top-level";
+
+/** What to pass Orca for the model and effort. omp has no effort flag in Orca: effort rides on the model id. */
+function launchPreferences(w: StartWorkerInput): { model?: string; effort?: string } {
+  if (!EFFORT_AS_MODEL_SUFFIX.has(w.agent)) return { model: w.model, effort: w.effort };
+  if (!w.model) return {};
+  if (!SAFE_MODEL.test(w.model))
+    throw new BackendError(`unsupported characters in model id "${w.model}"`, "bad_request");
+  if (!w.effort) return { model: w.model };
+  if (!THINKING_LEVELS.has(w.effort))
+    throw new BackendError(
+      `unknown effort "${w.effort}" for ${w.agent}; use one of ${[...THINKING_LEVELS].join(", ")}`,
+      "bad_request",
+    );
+  if (w.model.includes(":"))
+    throw new BackendError(`model "${w.model}" already names a level; omit effort`, "bad_request");
+  return { model: `${w.model}:${w.effort}` };
+}
+
+/** Orca's refusal of a launch-time model (releases before the OMP fix), raised before anything is created. */
+function refusedLaunchModel(err: unknown): boolean {
+  return (
+    err instanceof WorkerStartError &&
+    err.code === "invalid_argument" &&
+    /launch-time model selection/.test(err.message)
+  );
+}
 const COORDINATOR_TITLE = "heartwood-coordinator";
 /** Orca's orchestration contract; without it the lifecycle semantics below do not hold. */
 const REQUIRED_CAPABILITY = "orchestration.contract.v1";
@@ -182,7 +231,7 @@ export class OrcaBackend implements WorkerBackend {
   }
 
   private async senderFor(groupRef: string): Promise<string[]> {
-    const terminal = this.recall(groupRef);
+    const terminal = this.recall(GROUP_KEY + groupRef);
     if (!terminal)
       throw new BackendError(
         `no coordinator terminal is recorded for ${groupRef}; it was not created by this adapter's identity store`,
@@ -191,18 +240,18 @@ export class OrcaBackend implements WorkerBackend {
     return ["--from", terminal];
   }
 
-  private recall(groupRef: string): string | undefined {
-    return this.opts.identity?.get(`${GROUP_KEY}${groupRef}`) ?? this.volatile.get(groupRef);
+  private recall(key: string): string | undefined {
+    return this.opts.identity?.get(key) ?? this.volatile.get(key);
   }
 
-  private remember(groupRef: string, terminal: string): void {
-    if (this.opts.identity) this.opts.identity.set(`${GROUP_KEY}${groupRef}`, terminal);
-    else this.volatile.set(groupRef, terminal);
+  private remember(key: string, terminal: string): void {
+    if (this.opts.identity) this.opts.identity.set(key, terminal);
+    else this.volatile.set(key, terminal);
   }
 
-  private forget(groupRef: string): void {
-    this.opts.identity?.delete(`${GROUP_KEY}${groupRef}`);
-    this.volatile.delete(groupRef);
+  private forget(key: string): void {
+    this.opts.identity?.delete(key);
+    this.volatile.delete(key);
   }
 
   /** Run a command and return `result`. Throws BackendError on `ok:false` or unparsable output. */
@@ -253,7 +302,7 @@ export class OrcaBackend implements WorkerBackend {
         ["orchestration", "run-create", "--objective", objective, "--from", terminal],
         RunCreated,
       );
-      this.remember(r.run.id, terminal);
+      this.remember(GROUP_KEY + r.run.id, terminal);
       return { groupRef: r.run.id };
     } catch (err) {
       await this.closeTerminal(terminal);
@@ -262,10 +311,10 @@ export class OrcaBackend implements WorkerBackend {
   }
 
   async closeGroup(groupRef: string): Promise<void> {
-    const terminal = this.recall(groupRef);
+    const terminal = this.recall(GROUP_KEY + groupRef);
     if (!terminal) return;
     await this.closeTerminal(terminal);
-    this.forget(groupRef);
+    this.forget(GROUP_KEY + groupRef);
   }
 
   async createTask(groupRef: string, t: { spec: string; deps?: string[] }) {
@@ -287,20 +336,40 @@ export class OrcaBackend implements WorkerBackend {
     if (!!w.spec === !!w.taskRef)
       throw new BackendError("startWorker needs exactly one of spec or taskRef", "bad_request");
     if (w.effort && !w.model) throw new BackendError("effort requires model", "bad_request");
+    const prefs = launchPreferences(w);
+    const sender = await this.senderFor(groupRef);
+    try {
+      return await this.workerStart(groupRef, w, sender, [
+        ...(w.reuse ? ["--terminal", w.reuse] : ["--agent", w.agent]),
+        ...(prefs.model ? ["--model", prefs.model] : []),
+        ...(prefs.effort ? ["--effort", prefs.effort] : []),
+      ]);
+    } catch (err) {
+      // Orca releases before the OMP fix refuse a launch-time model. That check runs before anything is
+      // created, so falling back to starting the agent ourselves cannot leave a half-started worker behind.
+      if (!prefs.model || w.reuse || !refusedLaunchModel(err)) throw err;
+      return this.startInOwnTerminal(groupRef, w, sender, prefs.model, err);
+    }
+  }
+
+  /** `worker-start`, parsed. Failures carry Orca's receipt; never relaunch blindly. */
+  private async workerStart(
+    groupRef: string,
+    w: StartWorkerInput,
+    sender: string[],
+    agentArgs: string[],
+  ): Promise<StartedWorker> {
     const argv = ["orchestration", "worker-start", "--run", groupRef];
     argv.push(...(w.taskRef ? ["--task", w.taskRef] : ["--spec", w.spec as string]));
-    argv.push("--worktree", w.placement);
-    argv.push(...(w.reuse ? ["--terminal", w.reuse] : ["--agent", w.agent]));
-    if (w.model) argv.push("--model", w.model);
-    if (w.effort) argv.push("--effort", w.effort);
-    if (w.name) argv.push("--name", w.name);
+    argv.push("--worktree", w.placement, ...agentArgs);
+    // --name names a NEW worktree; Orca rejects it for current/existing ones.
+    if (w.name && createsWorktree(w.placement)) argv.push("--name", w.name);
     if (w.environment) argv.push("--on", w.environment);
-    argv.push(...(await this.senderFor(groupRef)), "--json");
+    argv.push(...sender, "--json");
 
     const r = await this.run(argv);
     const env = this.envelope(r.stdout, r.exitCode, r.stderr);
     if (!env.ok || r.exitCode !== 0) {
-      // Never relaunch blindly: surface Orca's receipt so the caller can follow its recovery path.
       const f = StartFailure.safeParse(env.result ?? {});
       throw new WorkerStartError(
         env.error?.message ?? "worker-start failed",
@@ -325,6 +394,48 @@ export class OrcaBackend implements WorkerBackend {
       // e.g. "outcome_unknown": the first turn could not be observed. Not a failure.
       state: s.data.state ?? "unknown",
     };
+  }
+
+  /**
+   * Start the agent with its model (and effort) inside an Orca terminal, then hand that terminal to
+   * `worker-start --terminal`. Verified: Orca accepts it as a supervised worker and waits for the agent
+   * itself, so no readiness polling is needed. Only possible in an existing worktree.
+   */
+  private async startInOwnTerminal(
+    groupRef: string,
+    w: StartWorkerInput,
+    sender: string[],
+    model: string,
+    refusal: unknown,
+  ): Promise<StartedWorker> {
+    const why = refusal instanceof Error ? refusal.message : String(refusal);
+    if (createsWorktree(w.placement) || w.environment)
+      throw new BackendError(
+        `this Orca refuses a launch-time model for ${w.agent} ("${why}"), and the fallback of starting ${w.agent} in a terminal needs an existing local worktree: use placement "current" or a worktree selector, omit the model, or update Orca`,
+        "model_requires_existing_worktree",
+      );
+    const created = await this.call(
+      [
+        "terminal",
+        "create",
+        "--worktree",
+        w.placement,
+        "--title",
+        `heartwood: ${w.name ?? w.agent}`,
+        "--command",
+        `${w.agent} --model ${model}`,
+      ],
+      TerminalCreated,
+    );
+    const handle = created.terminal.handle;
+    try {
+      const started = await this.workerStart(groupRef, w, sender, ["--terminal", handle]);
+      this.remember(WORKER_KEY + started.workerRef, handle);
+      return { ...started, locator: handle };
+    } catch (err) {
+      await this.closeTerminal(handle); // do not leak a terminal for a worker that never started
+      throw err;
+    }
   }
 
   async listWorkers(groupRef: string): Promise<WorkerInfo[]> {
@@ -368,7 +479,17 @@ export class OrcaBackend implements WorkerBackend {
     const r = await this.call(["orchestration", verb, "--dispatch", workerRef], Settled);
     if (r.state === "released" || r.state === "already_released") return { state: "released" };
     if (r.state === "release_pending") return { state: "pending" };
-    if (r.state === "retained") return { state: "retained", reason: r.reason ?? undefined };
+    if (r.state === "retained") {
+      // Orca never closes a terminal it did not create (it reports `external_terminal`). A terminal this
+      // adapter started itself is ours to close once the worker is released.
+      const own = this.recall(WORKER_KEY + workerRef);
+      if (own && disposition === "release" && r.reason === "external_terminal") {
+        await this.closeTerminal(own);
+        this.forget(WORKER_KEY + workerRef);
+        return { state: "released" };
+      }
+      return { state: "retained", reason: r.reason ?? undefined };
+    }
     throw new BackendError(`unexpected ${verb} state: ${r.state}`, "unexpected_state");
   }
 

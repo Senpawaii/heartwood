@@ -8,6 +8,8 @@ export const ConfigSchema = z.object({
   port: z.coerce.number().int().min(0).max(65535).default(7777),
   /** Bearer token required on every request except /health. Strongly recommended off loopback. */
   token: z.string().min(16).optional(),
+  /** Agent for dispatches that do not name one. */
+  defaultAgent: z.string().min(1).default("omp"),
   maxConcurrentGroups: z.coerce.number().int().positive().default(4),
   logLevel: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   lab: z
@@ -37,6 +39,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     host: env.HEARTWOOD_HOST,
     port: env.HEARTWOOD_PORT,
     token: env.HEARTWOOD_TOKEN,
+    defaultAgent: env.HEARTWOOD_DEFAULT_AGENT,
     maxConcurrentGroups: env.HEARTWOOD_MAX_GROUPS,
     logLevel: env.HEARTWOOD_LOG_LEVEL,
     lab: { skillDirs: env.HEARTWOOD_SKILL_DIRS },

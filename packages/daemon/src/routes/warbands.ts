@@ -33,7 +33,7 @@ const NewDispatch = z.object({
     ownership: z.string().min(1),
     acceptance: z.string().min(1),
   }),
-  agent: z.string().min(1).default("claude"),
+  agent: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   effort: z.string().min(1).optional(),
   placement: z.string().min(1).default("new-child"),
@@ -160,6 +160,7 @@ export function registerWarbandRoutes(app: FastifyInstance, d: DaemonContext): v
     if (!wb.members.some((m) => m.soulId === soul.soulId))
       throw new DomainError(`${soul.name} is not a member of this warband`);
 
+    const agent = b.agent ?? d.defaultAgent;
     const dispatch = await createDispatch(ctx, {
       warbandId: wb.warbandId,
       soulId: soul.soulId,
@@ -170,7 +171,7 @@ export function registerWarbandRoutes(app: FastifyInstance, d: DaemonContext): v
     try {
       worker = await backend.startWorker(wb.groupRef, {
         spec: dispatch.spec,
-        agent: b.agent,
+        agent,
         model: b.model,
         effort: b.effort,
         placement: b.placement,
@@ -189,7 +190,7 @@ export function registerWarbandRoutes(app: FastifyInstance, d: DaemonContext): v
       soulId: soul.soulId,
       dispatchId: dispatch.dispatchId,
       worker,
-      agent: b.agent,
+      agent,
       model: b.model,
       placement: b.placement,
     });

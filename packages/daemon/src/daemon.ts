@@ -38,6 +38,9 @@ export class HttpError extends Error {
   }
 }
 
+/** Workers run as Oh My Pi (`omp`), which uses whatever Claude model omp is configured with. Never `claude` directly. */
+export const DEFAULT_AGENT = "omp";
+
 export interface DaemonDeps {
   db: Db;
   backend: WorkerBackend;
@@ -47,6 +50,8 @@ export interface DaemonDeps {
   /** Bearer token required on every request except /health. */
   token?: string;
   coordinator?: CoordinatorOptions;
+  /** Agent for dispatches that do not name one. Default `omp` (Oh My Pi); Claude models run through it. */
+  defaultAgent?: string;
   logger?: boolean | { level: string };
 }
 
@@ -57,6 +62,8 @@ export type BackendState =
 
 /** Everything the routes need. */
 export interface DaemonContext {
+  /** Agent that dispatches use unless the request names one. */
+  defaultAgent: string;
   ctx: LabCtx;
   backend: WorkerBackend;
   coordinator: BackendCoordinator;
@@ -129,6 +136,7 @@ export async function createDaemon(deps: DaemonDeps): Promise<Daemon> {
 
   const app = Fastify({ logger: deps.logger ?? false });
   const dctx: DaemonContext = {
+    defaultAgent: deps.defaultAgent ?? DEFAULT_AGENT,
     ctx,
     backend: deps.backend,
     coordinator,

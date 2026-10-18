@@ -33,7 +33,7 @@ export type Outcome = z.infer<typeof Outcome>;
 export const DispatchOutcome = z.enum(["succeeded", "failed", "abandoned"]);
 export type DispatchOutcome = z.infer<typeof DispatchOutcome>;
 
-export const BodyAgent = z.string().min(1); // "claude" | "codex" | future agents
+export const BodyAgent = z.string().min(1); // Orca agent id; Heartwood runs "omp" (Oh My Pi) by default
 export type BodyAgent = z.infer<typeof BodyAgent>;
 
 export const WarbandRole = z.enum(["foreman", "member"]);

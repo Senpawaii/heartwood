@@ -34,6 +34,7 @@ const daemon = await createDaemon({
     identity: new SqliteKv(db, "orca"),
   }),
   lab,
+  defaultAgent: config.defaultAgent,
   coordinator: { maxConcurrentGroups: config.maxConcurrentGroups },
 });
 

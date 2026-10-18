@@ -171,7 +171,7 @@ function Dispatch({
     constraints: "",
     ownership: "",
     acceptance: "",
-    agent: "claude",
+    agent: "",
     model: "",
     placement: "new-child",
   });
@@ -188,7 +188,7 @@ function Dispatch({
           ownership: f.ownership,
           acceptance: f.acceptance,
         },
-        agent: f.agent,
+        agent: f.agent.trim() || undefined,
         model: f.model || undefined,
         placement: f.placement,
       }),
@@ -232,11 +232,11 @@ function Dispatch({
         </Field>
       ))}
       <div className="grid grid-cols-3 gap-3">
-        <Field label="Agent">
-          <Input value={f.agent} onChange={set("agent")} />
+        <Field label="Agent (blank: daemon default, omp)">
+          <Input value={f.agent} onChange={set("agent")} placeholder="omp" />
         </Field>
-        <Field label="Model (optional)">
-          <Input value={f.model} onChange={set("model")} />
+        <Field label="Model (leave blank for omp)">
+          <Input value={f.model} onChange={set("model")} placeholder="omp's own model" />
         </Field>
         <Field label="Placement">
           <Input value={f.placement} onChange={set("placement")} />
