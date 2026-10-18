@@ -244,8 +244,8 @@ importers:
   packages/daemon:
     dependencies:
       '@grimoire/core':
-        specifier: https://github.com/Senpawaii/grimoire-lab/releases/download/v0.2.0/grimoire-core-0.2.0.tgz
-        version: https://github.com/Senpawaii/grimoire-lab/releases/download/v0.2.0/grimoire-core-0.2.0.tgz
+        specifier: https://github.com/Senpawaii/grimoire-lab/releases/download/v0.3.0/grimoire-core-0.3.0.tgz
+        version: https://github.com/Senpawaii/grimoire-lab/releases/download/v0.3.0/grimoire-core-0.3.0.tgz
       '@heartwood/core':
         specifier: workspace:*
         version: link:../core
@@ -272,8 +272,8 @@ importers:
   packages/integrations:
     dependencies:
       '@grimoire/core':
-        specifier: https://github.com/Senpawaii/grimoire-lab/releases/download/v0.2.0/grimoire-core-0.2.0.tgz
-        version: https://github.com/Senpawaii/grimoire-lab/releases/download/v0.2.0/grimoire-core-0.2.0.tgz
+        specifier: https://github.com/Senpawaii/grimoire-lab/releases/download/v0.3.0/grimoire-core-0.3.0.tgz
+        version: https://github.com/Senpawaii/grimoire-lab/releases/download/v0.3.0/grimoire-core-0.3.0.tgz
       '@heartwood/core':
         specifier: workspace:*
         version: link:../core
@@ -598,9 +598,9 @@ packages:
   '@fastify/proxy-addr@5.1.2':
     resolution: {integrity: sha512-uqB4QsgVoro0XDC+DIftIMGXHdBPn+lK6Ek3xXAIxPMCJfqxnbtyEoMCm2KPUVOuIosd7Cyw9HawEqMFM/UA+g==}
 
-  '@grimoire/core@https://github.com/Senpawaii/grimoire-lab/releases/download/v0.2.0/grimoire-core-0.2.0.tgz':
-    resolution: {integrity: sha512-dAujOe5rJIenNb1BRbx7VB5mEbv8Wj5hmUhetztG48jCW/mYII0X9jCtogW14pGceQM/SdnHvUyERJNM1SV43w==, tarball: https://github.com/Senpawaii/grimoire-lab/releases/download/v0.2.0/grimoire-core-0.2.0.tgz}
-    version: 0.2.0
+  '@grimoire/core@https://github.com/Senpawaii/grimoire-lab/releases/download/v0.3.0/grimoire-core-0.3.0.tgz':
+    resolution: {integrity: sha512-+FOvhjKnfI7FHivfXn5iijDHd3TF0XRHPbyfIdK2AfDG3/05rLUK72fZcT7Y7b+Q8JjwM0dVj9jRejCpjArrFg==, tarball: https://github.com/Senpawaii/grimoire-lab/releases/download/v0.3.0/grimoire-core-0.3.0.tgz}
+    version: 0.3.0
     engines: {node: '>=22.13'}
 
   '@jridgewell/gen-mapping@0.3.13':
@@ -1965,7 +1965,7 @@ snapshots:
       '@fastify/forwarded': 3.1.1
       ipaddr.js: 2.5.0
 
-  '@grimoire/core@https://github.com/Senpawaii/grimoire-lab/releases/download/v0.2.0/grimoire-core-0.2.0.tgz':
+  '@grimoire/core@https://github.com/Senpawaii/grimoire-lab/releases/download/v0.3.0/grimoire-core-0.3.0.tgz':
     dependencies:
       execa: 10.1.1
       yaml: 2.9.1

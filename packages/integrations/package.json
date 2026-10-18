@@ -13,7 +13,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@grimoire/core": "https://github.com/Senpawaii/grimoire-lab/releases/download/v0.2.0/grimoire-core-0.2.0.tgz",
+    "@grimoire/core": "https://github.com/Senpawaii/grimoire-lab/releases/download/v0.3.0/grimoire-core-0.3.0.tgz",
     "@heartwood/core": "workspace:*",
     "@heartwood/protocol": "workspace:*",
     "execa": "^10.1.1",
