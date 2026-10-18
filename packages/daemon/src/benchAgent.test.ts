@@ -1,6 +1,6 @@
 import type { AgentAdapter } from "@grimoire/core";
 import { describe, expect, it } from "vitest";
-import { BenchAgentError, loadBenchAgent, type ModuleLoader } from "./benchAgent.js";
+import { type AdapterLookup, BenchAgentError, loadBenchAgent } from "./benchAgent.js";
 import { loadConfig } from "./config.js";
 
 const adapter = (available: boolean): AgentAdapter => ({
@@ -11,69 +11,43 @@ const adapter = (available: boolean): AgentAdapter => ({
     throw new Error("not used");
   },
 });
-const moduleWith =
-  (getAdapter: unknown): ModuleLoader =>
-  async () => ({ getAdapter });
-
 describe("loadBenchAgent", () => {
-  it("returns nothing, and loads nothing, when no agent is configured", async () => {
-    let loaded = false;
-    const load: ModuleLoader = async () => {
-      loaded = true;
-      return {};
-    };
-    expect(await loadBenchAgent(undefined, load)).toBeUndefined();
-    expect(await loadBenchAgent("", load)).toBeUndefined();
-    expect(loaded).toBe(false);
+  it("returns nothing, and looks nothing up, when no agent is configured", async () => {
+    const asked: string[] = [];
+    const lookup: AdapterLookup = (id) => (asked.push(id), adapter(true));
+    expect(await loadBenchAgent(undefined, lookup)).toBeUndefined();
+    expect(await loadBenchAgent("", lookup)).toBeUndefined();
+    expect(asked).toEqual([]);
   });
 
   it("returns the adapter grimoire-lab hands out for the configured id", async () => {
     const asked: string[] = [];
     const a = adapter(true);
-    const got = await loadBenchAgent(
-      "omp",
-      moduleWith((id: string) => (asked.push(id), a)),
-    );
+    const got = await loadBenchAgent("omp", (id) => (asked.push(id), a));
     expect(got).toBe(a);
     expect(asked).toEqual(["omp"]);
   });
 
-  it("refuses to start when the adapters package cannot be loaded, saying what to do", async () => {
-    const err = await loadBenchAgent("omp", async () => {
-      throw new Error("Cannot find package '@grimoire/adapters'");
-    }).catch((e) => e);
-    expect(err).toBeInstanceOf(BenchAgentError);
-    expect(err.message).toMatch(/HEARTWOOD_BENCH_AGENT=omp needs @grimoire\/adapters/);
-    expect(err.message).toMatch(/Cannot find package/);
-    expect(err.message).toMatch(/README/);
-  });
-
-  it("refuses a package that is not the adapters package it expects", async () => {
-    await expect(loadBenchAgent("omp", async () => ({ other: 1 }))).rejects.toThrow(
-      /does not export getAdapter/,
-    );
-    await expect(loadBenchAgent("omp", async () => "nope")).rejects.toBeInstanceOf(BenchAgentError);
-    await expect(loadBenchAgent("omp", moduleWith("not a function"))).rejects.toBeInstanceOf(
-      BenchAgentError,
-    );
-  });
-
   it("reports an unknown agent id with grimoire-lab's own message", async () => {
-    const load = moduleWith((id: string) => {
+    const err = await loadBenchAgent("nope", (id) => {
       throw new Error(`unknown agent "${id}"`);
-    });
-    const err = await loadBenchAgent("nope", load).catch((e) => e);
+    }).catch((e) => e);
     expect(err).toBeInstanceOf(BenchAgentError);
     expect(err.message).toBe('HEARTWOOD_BENCH_AGENT=nope: unknown agent "nope"');
   });
 
   it("refuses an agent that is not installed on this machine instead of failing every trial later", async () => {
-    const err = await loadBenchAgent(
-      "omp",
-      moduleWith(() => adapter(false)),
-    ).catch((e) => e);
+    const err = await loadBenchAgent("omp", () => adapter(false)).catch((e) => e);
     expect(err).toBeInstanceOf(BenchAgentError);
     expect(err.message).toMatch(/omp is not available on this machine/);
+  });
+
+  it("uses the real @grimoire/adapters by default: omp resolves, or is reported as not installed", async () => {
+    // CI machines have no omp, a developer machine does; the lookup itself must work on both
+    const out = await loadBenchAgent("omp").catch((e) => e);
+    if (out instanceof BenchAgentError)
+      expect(out.message).toMatch(/omp is not available on this machine/);
+    else expect(out).toMatchObject({ id: "omp" });
   });
 });
 
@@ -89,6 +63,11 @@ describe("benchmark configuration", () => {
       HEARTWOOD_BENCH_REPEAT: "10",
     });
     expect(c.bench).toEqual({ agent: "omp", model: "anthropic/claude-sonnet-5-5:low", repeat: 10 });
+  });
+
+  it("accepts only omp as the benchmark agent, never claude directly", () => {
+    expect(() => loadConfig({ HEARTWOOD_BENCH_AGENT: "claude-code" })).toThrow();
+    expect(() => loadConfig({ HEARTWOOD_BENCH_AGENT: "command" })).toThrow();
   });
 
   it("rejects a trial count that is not a positive whole number", () => {
