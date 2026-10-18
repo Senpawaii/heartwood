@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { digestOf } from "./fakeLab.js";
 import { DigestMismatchError, LabUnavailableError } from "./lab.js";
 import { absorbSkill, analyzeSkill, evolveSkill } from "./labService.js";
+import { defaultRules, type Rules } from "./rules.js";
 import { makeTown, payloads, type Town } from "./testing.js";
 
 const rankOf = (t: Town, name: string, digest: string) => {
@@ -74,8 +75,8 @@ describe("Lab service", () => {
   });
 
   describe("evolve", () => {
-    const setup = () => {
-      const t = makeTown();
+    const setup = (rules?: Rules) => {
+      const t = makeTown(rules);
       const v1 = t.lab.addSkill("tdd", "v1");
       t.lab.setScore(v1, 0.4);
       let n = 0;
@@ -98,9 +99,10 @@ describe("Lab service", () => {
       expect(rankOf(t, "tdd", win.candidate.digest)).toBe("ultimate");
     });
 
-    it("rejects a worse version and does not promote it", async () => {
+    it("rejects a clearly worse version and does not promote it", async () => {
       const { t, v1, candidate } = setup();
-      t.lab.setScore(candidate(2), 0.1);
+      t.lab.setScore(v1, 0.9);
+      t.lab.setScore(candidate(2), 0.0);
       const lose = await evolveSkill(t, v1);
       expect(lose.promoted).toBe(false);
       expect(t.lab.promotions).toEqual([]);
@@ -122,6 +124,36 @@ describe("Lab service", () => {
       const { t, v1, candidate } = setup();
       t.lab.setScore(candidate(2), 0.5); // +0.1 over 0.4, tolerance is 0.15
       expect((await evolveSkill(t, v1)).promoted).toBe(false);
+    });
+
+    it("a clear-looking improvement whose 95% interval includes zero is rejected, and the reason shows the interval", async () => {
+      const { t, v1, candidate } = setup();
+      t.lab.setScore(candidate(2), 0.7); // +0.3 over 0.4 on 10 trials per side: passes the delta gate, not the interval
+      const out = await evolveSkill(t, v1);
+      expect(out.promoted).toBe(false);
+      expect(out.comparison.delta).toBeCloseTo(0.3);
+      expect(out.comparison.ci?.lower).toBeLessThan(0);
+      expect(t.lab.promotions).toEqual([]);
+      const reason = payloads(t.log, "skill.evolve_rejected")[0]?.reason ?? "";
+      expect(reason).toMatch(/95% interval \[-\d\.\d\d, \d\.\d\d\]/);
+      expect(reason).toMatch(/interval that excludes 0/);
+    });
+
+    it("the same evidence promotes when the interval requirement is switched off", async () => {
+      const { t, v1, candidate } = setup({
+        ...defaultRules,
+        promotion: { ...defaultRules.promotion, requireCiExcludesZero: false },
+      });
+      t.lab.setScore(candidate(2), 0.7);
+      expect((await evolveSkill(t, v1)).promoted).toBe(true);
+    });
+
+    it("a decisive win has an interval entirely above zero", async () => {
+      const { t, v1, candidate } = setup();
+      t.lab.setScore(candidate(2), 0.9);
+      const out = await evolveSkill(t, v1);
+      expect(out.comparison.ci?.lower).toBeGreaterThan(0);
+      expect(out.promoted).toBe(true);
     });
 
     it("surfaces an explicit error when the Lab cannot propose versions, and proposes nothing", async () => {

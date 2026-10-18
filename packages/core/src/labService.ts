@@ -1,7 +1,7 @@
 import type { HeartwoodEvent, PinnedSkill, SkillRank } from "@heartwood/protocol";
 import type { LabCtx } from "./context.js";
 import { DomainError } from "./errors.js";
-import type { Comparison, Evidence } from "./lab.js";
+import { agentLabel, type Comparison, type Evidence } from "./lab.js";
 import { deriveSkillRank } from "./rules.js";
 
 /** Absorb: the soul acquires a skill from the Lab, pinned by digest and kept in Heartwood's own store. */
@@ -41,6 +41,8 @@ function recordEvidence(
         trials: e.trials,
         errors: e.errors,
         conclusive: rank !== undefined,
+        suiteDigest: e.suiteDigest,
+        agent: agentLabel(e.agent),
       },
       actor: { kind: "daemon" },
       correlation: {},
@@ -54,6 +56,8 @@ function recordEvidence(
               rank,
               score: e.passRate,
               thresholdsVersion: ctx.rules.thresholdsVersion,
+              suiteDigest: e.suiteDigest,
+              agent: agentLabel(e.agent),
             },
             actor: { kind: "daemon" as const },
             correlation: {},
@@ -106,9 +110,13 @@ export async function evolveSkill(ctx: LabCtx, current: PinnedSkill): Promise<Ev
   events.push(...recordEvidence(ctx, cmp.candidate).events);
 
   if (!(cmp.significant && cmp.verdict === "better")) {
+    const interval = cmp.ci
+      ? `95% interval [${cmp.ci.lower.toFixed(2)}, ${cmp.ci.upper.toFixed(2)}]`
+      : "no interval";
+    const need = `needs at least ${gate.minTrials} countable trials per side, |delta| >= ${gate.tolerance}${gate.requireCiExcludesZero ? " and a 95% interval that excludes 0" : ""}`;
     const why = cmp.significant
       ? `verdict ${cmp.verdict} (delta ${cmp.delta.toFixed(3)})`
-      : `not significant: delta ${cmp.delta.toFixed(3)} on ${cmp.n.candidate}/${cmp.n.baseline} trials (needs at least ${gate.minTrials} countable trials per side and |delta| >= ${gate.tolerance})`;
+      : `not significant: delta ${cmp.delta.toFixed(3)}, ${interval}, on ${cmp.n.candidate}/${cmp.n.baseline} trials (${need})`;
     events.push(
       ...ctx.log.append([
         {

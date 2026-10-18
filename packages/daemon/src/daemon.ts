@@ -14,6 +14,7 @@ import {
   LabUnavailableError,
   NotFoundError,
   type Rules,
+  SourceUnavailableError,
   SqliteEventLog,
   type WorkerBackend,
   WorkerStartError,
@@ -165,6 +166,7 @@ export async function createDaemon(deps: DaemonDeps): Promise<Daemon> {
     if (err instanceof NotFoundError) return send(404, "not_found");
     if (err instanceof DomainError) return send(409, "conflict");
     if (err instanceof LabUnavailableError) return send(501, "lab_unavailable");
+    if (err instanceof SourceUnavailableError) return send(503, "source_unavailable");
     if (err instanceof WorkerStartError)
       return send(502, err.code ?? "worker_start_failed", {
         failedStage: err.failedStage,

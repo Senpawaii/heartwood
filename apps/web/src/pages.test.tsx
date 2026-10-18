@@ -322,6 +322,37 @@ describe("pages", () => {
     expect(screen.getByText("running")).toBeTruthy();
   });
 
+  it("skills page lists one skill digest once per agent it was measured with, and marks older ranks unknown", async () => {
+    const row = (agent: string, rank: string, suiteDigest = "sha256:suite1") => ({
+      name: "tdd",
+      digest: "sha256:abcdef0123456789",
+      suiteDigest,
+      agent,
+      rank,
+      score: 0.8,
+      thresholdsVersion: "default-2",
+    });
+    const d = fakeDaemon({
+      "GET /health": ready,
+      "GET /inbox": inbox,
+      "GET /skills/usage": { usage: [] },
+      "GET /skills/ranks": {
+        ranks: [
+          row("omp@18.5.1 anthropic/claude-sonnet-5-5:high", "ultimate"),
+          row("omp@18.5.1 anthropic/claude-haiku-4-5:low", "extra"),
+          row("", "unique", ""),
+        ],
+      },
+    });
+    mount(d, "/skills");
+    expect(await screen.findByText("omp@18.5.1 anthropic/claude-sonnet-5-5:high")).toBeTruthy();
+    expect(screen.getByText("omp@18.5.1 anthropic/claude-haiku-4-5:low")).toBeTruthy();
+    expect(screen.getByText("unknown")).toBeTruthy();
+    expect(screen.getAllByText("tdd")).toHaveLength(3);
+    expect(screen.getByText("ultimate")).toBeTruthy();
+    expect(screen.getByText("extra")).toBeTruthy();
+  });
+
   it("shows a token hint when the daemon answers 401", async () => {
     const fetchFn = (async () =>
       new Response(JSON.stringify({ error: "unauthorized", message: "missing or invalid token" }), {

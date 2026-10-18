@@ -159,7 +159,11 @@ adapter.
 create one on Windows); identical digests across Windows and Linux; omp's `--skills` filter; `gitSource` on very
 large repositories or remote clones.
 
-## 7. What Heartwood will do on its side
+## 7. What Heartwood does on its side
+
+Status: items 1 to 3 are done and pushed (0.2.0 is installed with an integrity-pinned lockfile entry; the
+interval gate is on by default; ranks are keyed by suite and agent; a failing source is isolated, with a
+refusal for bare names while one is down). Item 4 is next. Item 5 waits for the omp adapter.
 
 1. Upgrade to 0.2.0, pass `requireCiExcludesZero: true` in promotion, and add a `requireCi` knob to its gate.
 2. Key stored skill ranks by (skill digest, suite digest, agent + model + effort). Today they are keyed by

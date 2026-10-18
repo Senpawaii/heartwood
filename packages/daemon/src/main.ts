@@ -20,6 +20,10 @@ const lab = new GrimoireLab({
   store: new SkillStore(join(dataDir, "skills")),
   results,
   outDir: join(dataDir, "grimoire", "runs"),
+  onSourceProblem: (p) =>
+    process.stderr.write(
+      `${JSON.stringify({ level: "warn", msg: "skill source problem", ...p })}\n`,
+    ),
 });
 
 const daemon = await createDaemon({

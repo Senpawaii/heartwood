@@ -57,6 +57,10 @@ export type ProficiencyPoint = z.infer<typeof ProficiencyPoint>;
 export const SkillRankRow = z.object({
   name: z.string(),
   digest: z.string(),
+  /** Suite the rank was measured on; empty for ranks recorded before this was tracked. */
+  suiteDigest: z.string(),
+  /** `id@version model:effort` the rank was measured with; empty for older ranks. */
+  agent: z.string(),
   rank: z.string(),
   score: z.number(),
   thresholdsVersion: z.string(),

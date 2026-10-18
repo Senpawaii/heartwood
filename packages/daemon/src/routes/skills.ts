@@ -17,15 +17,22 @@ export function registerSkillRoutes(app: FastifyInstance, d: DaemonContext): voi
   const { ctx } = d;
 
   /** Skills the Lab offers. 501 until a Lab adapter is configured. */
-  app.get("/skills", async () => ({ skills: await ctx.lab.listSkills() }));
+  app.get("/skills", async () => ({
+    skills: await ctx.lab.listSkills(),
+    // catalog sources that are down right now; the list above is built from the others
+    problems: ctx.lab.sourceProblems(),
+  }));
 
   /** Town-wide usage: most used first, with success rate. `injectedOnly` marks usage not verified by transcript. */
   app.get("/skills/usage", async () => ({ usage: townSkillUsage(ctx.db) }));
 
+  /** One row per (skill digest, suite, agent): the same skill ranked under another model is a separate fact. */
   app.get("/skills/ranks", async () => ({
     ranks: ctx.db
       .prepare(
-        "SELECT name, digest, rank, score, thresholds_version AS thresholdsVersion FROM skill_ranks ORDER BY name, digest",
+        `SELECT name, digest, suite_digest AS suiteDigest, agent, rank, score,
+                thresholds_version AS thresholdsVersion
+           FROM skill_ranks ORDER BY name, digest, agent, suite_digest`,
       )
       .all(),
   }));

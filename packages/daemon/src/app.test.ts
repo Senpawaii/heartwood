@@ -1,4 +1,11 @@
-import { type FakeBackend, UnavailableLab, WorkerStartError } from "@heartwood/core";
+import {
+  type FakeBackend,
+  FakeLab,
+  type SkillRef,
+  SourceUnavailableError,
+  UnavailableLab,
+  WorkerStartError,
+} from "@heartwood/core";
 import { describe, expect, it } from "vitest";
 import {
   type Booted,
@@ -489,6 +496,8 @@ describe("skills and Lab", () => {
         rank: "unique",
         score: 0.8,
         thresholdsVersion: "default-2",
+        suiteDigest: "suite:tdd:default",
+        agent: "fake",
       },
     ]);
     expect((await json(b.app, "GET", `/souls/${t.worker}`)).body.skills[0]).toMatchObject({
@@ -497,6 +506,30 @@ describe("skills and Lab", () => {
     const ev = await json(b.app, "POST", "/skills/evolve", { name: "tdd", digest: ref.digest });
     expect(ev.status).toBe(501);
     expect(ev.body.error).toBe("lab_unavailable");
+  });
+
+  it("reports catalog sources that are down, and answers 503 (not 501 or 500) when a name cannot be resolved safely", async () => {
+    class DownLab extends FakeLab {
+      override sourceProblems() {
+        return [{ source: "flaky", operation: "list" as const, message: "network down" }];
+      }
+      override async resolve(name: string): Promise<SkillRef> {
+        if (!name.includes("@")) throw new SourceUnavailableError("flaky is unavailable");
+        return super.resolve(name);
+      }
+    }
+    const lab = new DownLab();
+    lab.addSkill("tdd", "v1");
+    const b = await boot({ lab });
+    const t = await seedTown(b);
+    const list = await json(b.app, "GET", "/skills");
+    expect(list.body.skills.map((s: { name: string }) => s.name)).toEqual(["tdd"]);
+    expect(list.body.problems).toEqual([
+      { source: "flaky", operation: "list", message: "network down" },
+    ]);
+    const r = await json(b.app, "POST", `/souls/${t.worker}/skills`, { name: "tdd" });
+    expect(r.status).toBe(503);
+    expect(r.body.error).toBe("source_unavailable");
   });
 
   it("without a Lab adapter every Lab operation fails loudly, never silently", async () => {

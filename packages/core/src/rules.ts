@@ -47,7 +47,7 @@ export const defaultRules: Rules = {
     unique: { minPassRate: 0.75, minLift: 0.1 },
     ultimate: { minPassRate: 0.9, minLift: 0.2 },
   },
-  promotion: { minTrials: 10, tolerance: 0.15 },
+  promotion: { minTrials: 10, tolerance: 0.15, requireCiExcludesZero: true },
   thresholdsVersion: "default-2",
   xp: { taskSuccess: 10, taskFailure: 2, foremanPerSuccess: 1, foremanCapPerWarband: 10 },
   proficiency: { alpha: 0.3, confidenceK: 3 },

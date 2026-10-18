@@ -272,13 +272,17 @@ export interface SoulSkillView {
   proficiency: number | null;
 }
 
-/** Skills a soul has absorbed, with the skill's rank and the soul's own proficiency. */
+/**
+ * Skills a soul has absorbed, with the skill's most recent rank (a skill digest can be ranked under
+ * several suites and agents; see `skill_ranks`) and the soul's own proficiency.
+ */
 export function listSoulSkills(db: Db, soulId: string): SoulSkillView[] {
   return db
     .prepare(
-      `SELECT s.name, s.digest, s.source, r.rank AS rank, p.score AS proficiency
+      `SELECT s.name, s.digest, s.source, p.score AS proficiency,
+              (SELECT r.rank FROM skill_ranks r WHERE r.name = s.name AND r.digest = s.digest
+                 ORDER BY r.seq DESC LIMIT 1) AS rank
          FROM soul_skills s
-         LEFT JOIN skill_ranks r ON r.name = s.name AND r.digest = s.digest
          LEFT JOIN proficiency p ON p.soul_id = s.soul_id AND p.skill_name = s.name
          WHERE s.soul_id = ? ORDER BY s.name`,
     )

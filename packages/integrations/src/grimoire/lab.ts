@@ -38,6 +38,8 @@ import {
   type PromotionGate,
   type ProposedVersion,
   type SkillRef,
+  type SourceProblem,
+  SourceUnavailableError,
 } from "@heartwood/core";
 import type { PinnedSkill } from "@heartwood/protocol";
 import type { SkillStore } from "./store.js";
@@ -65,6 +67,8 @@ export interface GrimoireLabOptions {
   rewriter?: SkillRewriter;
   repeat?: number;
   model?: string;
+  /** Called whenever a catalog source fails, for logging. The failure is also kept in `sourceProblems()`. */
+  onSourceProblem?: (problem: SourceProblem) => void;
 }
 
 /** Staged candidates that are not in any catalog yet: a `SkillSource` so they can be loaded by digest. */
@@ -96,11 +100,50 @@ export class GrimoireLab implements LabPort {
   private readonly staging = new Staging();
   private readonly stagedDirs: string[] = [];
 
-  constructor(private readonly o: GrimoireLabOptions) {}
+  /** The catalogs, each wrapped so one that throws is reported and skipped rather than breaking the others. */
+  private readonly sources: SkillSource[];
+  private readonly problems = new Map<string, SourceProblem>();
+
+  constructor(private readonly o: GrimoireLabOptions) {
+    this.sources = o.sources.map((s) => this.guard(s));
+  }
+
+  private guard(src: SkillSource): SkillSource {
+    const fail = (operation: SourceProblem["operation"], err: unknown): void => {
+      const p = {
+        source: src.id,
+        operation,
+        message: err instanceof Error ? err.message : String(err),
+      };
+      this.problems.set(src.id, p);
+      this.o.onSourceProblem?.(p);
+    };
+    return {
+      id: src.id,
+      list: async () => {
+        try {
+          const listings = await src.list();
+          this.problems.delete(src.id); // it answered: whatever was wrong is over
+          return listings;
+        } catch (err) {
+          fail("list", err);
+          return [];
+        }
+      },
+      load: async (digest) => {
+        try {
+          return await src.load(digest);
+        } catch (err) {
+          fail("load", err);
+          return undefined;
+        }
+      },
+    };
+  }
 
   /** Everything a pinned digest can be loaded from. */
   private get all(): SkillSource[] {
-    return [this.o.store, ...this.o.sources, this.staging];
+    return [this.o.store, ...this.sources, this.staging];
   }
 
   private requireAgent(op: string): AgentAdapter {
@@ -123,27 +166,39 @@ export class GrimoireLab implements LabPort {
 
   async listSkills(): Promise<SkillRef[]> {
     const byName = new Map<string, SkillRef>();
-    for (const src of this.o.sources)
+    // a source that is down contributes nothing (and is reported by sourceProblems) instead of failing the catalog
+    for (const src of this.sources)
       for (const l of await src.list()) if (l.current !== false) byName.set(l.name, this.toRef(l));
     // a version promoted into Heartwood's store supersedes what the catalog still holds
     for (const l of await this.o.store.list()) if (l.current) byName.set(l.name, this.toRef(l));
     return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  sourceProblems(): SourceProblem[] {
+    return [...this.problems.values()];
+  }
+
   async resolve(name: string): Promise<SkillRef> {
-    const bare = name.split("@")[0] ?? name;
-    if (name === bare) {
+    // `name@1.2.0` and `sha256:…` (or `name@sha256:…`) name exactly one thing; a bare `name` means "the current one"
+    const isBareName = !name.includes("@") && !name.startsWith("sha256:");
+    if (isBareName) {
+      const bare = name;
       const promoted = await this.o.store.currentDigest(bare);
       if (promoted) {
         const hit = (await this.o.store.list()).find((l) => l.digest === promoted);
         if (hit) return this.toRef(hit);
       }
     }
+    const listings = (await Promise.all(this.sources.map((s) => s.list()))).flat();
+    const down = [...this.problems.values()].filter((p) => p.operation === "list");
+    // A bare name is only unambiguous if every source was heard from; a digest or name@version is exact.
+    if (isBareName && down.length > 0)
+      throw new SourceUnavailableError(
+        `cannot resolve "${name}" while ${down.map((p) => `${p.source} is unavailable (${p.message})`).join("; ")}: it might be ambiguous. Use name@version or a digest, or retry`,
+      );
     try {
-      const ref = await resolveSkill(name, this.o.sources);
-      const listing = (await Promise.all(this.o.sources.map((s) => s.list())))
-        .flat()
-        .find((l) => l.digest === ref.digest && l.name === ref.name);
+      const ref = await resolveSkill(name, this.sources);
+      const listing = listings.find((l) => l.digest === ref.digest && l.name === ref.name);
       return {
         name: ref.name,
         digest: ref.digest,
@@ -310,6 +365,7 @@ export class GrimoireLab implements LabPort {
       const c = grimoireCompare(armRef(result, cand.skill), armRef(result, base.skill), {
         minTrials: gate.minTrials,
         tolerance: gate.tolerance,
+        requireCiExcludesZero: gate.requireCiExcludesZero,
       });
       return {
         candidate: toEvidence(result, cand.skill),
@@ -322,6 +378,7 @@ export class GrimoireLab implements LabPort {
           baselineErrors: c.n.referenceErrors,
         },
         significant: c.significant,
+        ci: c.ci ? { lower: c.ci.lower, upper: c.ci.upper } : undefined,
         verdict: c.verdict,
       };
     } finally {

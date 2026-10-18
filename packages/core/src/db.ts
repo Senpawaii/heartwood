@@ -83,6 +83,18 @@ const migrations: string[] = [
   CREATE INDEX memories_owner ON memories(owner_soul_id, layer);
   CREATE VIRTUAL TABLE memories_fts USING fts5(text, tags, tokenize='porter unicode61');
   `,
+  // 2: a skill's rank belongs to (skill digest, suite digest, agent). Existing rows predate that and keep '' for both.
+  `
+  CREATE TABLE skill_ranks_v2 (
+    seq INTEGER NOT NULL, name TEXT NOT NULL, digest TEXT NOT NULL,
+    suite_digest TEXT NOT NULL DEFAULT '', agent TEXT NOT NULL DEFAULT '',
+    rank TEXT NOT NULL, score REAL NOT NULL, thresholds_version TEXT NOT NULL,
+    PRIMARY KEY (name, digest, suite_digest, agent));
+  INSERT INTO skill_ranks_v2 (seq, name, digest, rank, score, thresholds_version)
+    SELECT 0, name, digest, rank, score, thresholds_version FROM skill_ranks;
+  DROP TABLE skill_ranks;
+  ALTER TABLE skill_ranks_v2 RENAME TO skill_ranks;
+  `,
 ];
 
 export function openDb(path = ":memory:"): Db {

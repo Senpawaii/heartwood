@@ -9,6 +9,7 @@ import {
   type RunResult,
   type Skill,
   type SkillRewriter,
+  type SkillSource,
   type Workspace,
 } from "@grimoire/core";
 import {
@@ -24,6 +25,7 @@ import {
   NotFoundError,
   openDb,
   type Rules,
+  SourceUnavailableError,
   SqliteEventLog,
 } from "@heartwood/core";
 import { afterEach, describe, expect, it } from "vitest";
@@ -88,7 +90,7 @@ afterEach(async () => {
 const SMALL: Rules = {
   ...defaultRules,
   skillRank: { ...defaultRules.skillRank, minTrials: 4 },
-  promotion: { minTrials: 4, tolerance: 0.15 },
+  promotion: { minTrials: 4, tolerance: 0.15, requireCiExcludesZero: true },
 };
 
 async function world(
@@ -197,6 +199,99 @@ describe("GrimoireLab: catalog, pinning, rendering (no agent needed)", () => {
   });
 });
 
+/** A catalog that can be taken down and brought back, like a remote or a network drive. */
+class FlakySource implements SkillSource {
+  readonly id = "flaky";
+  down = false;
+  constructor(private readonly inner: SkillSource) {}
+  async list() {
+    if (this.down) throw new Error("network down");
+    return this.inner.list();
+  }
+  async load(digest: string) {
+    if (this.down) throw new Error("network down");
+    return this.inner.load(digest);
+  }
+}
+
+describe("GrimoireLab: a failing catalog source is isolated", () => {
+  async function withFlaky() {
+    const w = await world({ agent: null });
+    // a second catalog holding a different skill
+    const other = join(w.root, "other");
+    await mkdir(join(other, "lint"), { recursive: true });
+    await writeFile(
+      join(other, "lint", "SKILL.md"),
+      "---\nname: lint\ndescription: Lint things.\nversion: 2.0.0\n---\nRun the linter.\n",
+    );
+    const flaky = new FlakySource(dirSource(other));
+    const seen: string[] = [];
+    const lab = new GrimoireLab({
+      sources: [dirSource(join(w.root, "skills")), flaky],
+      store: w.store,
+      results: w.results,
+      outDir: join(w.root, "runs"),
+      onSourceProblem: (p) => seen.push(`${p.source}:${p.operation}`),
+    });
+    return { w, lab, flaky, seen };
+  }
+
+  it("listing keeps working from the healthy sources and reports the one that is down", async () => {
+    const { lab, flaky, seen } = await withFlaky();
+    expect((await lab.listSkills()).map((s) => s.name)).toEqual(["lint", "tdd"]);
+    expect(lab.sourceProblems()).toEqual([]);
+
+    flaky.down = true;
+    expect((await lab.listSkills()).map((s) => s.name)).toEqual(["tdd"]);
+    expect(lab.sourceProblems()).toEqual([
+      { source: "flaky", operation: "list", message: "network down" },
+    ]);
+    expect(seen).toEqual(["flaky:list"]);
+
+    flaky.down = false; // it recovers and the problem clears itself
+    expect((await lab.listSkills()).map((s) => s.name)).toEqual(["lint", "tdd"]);
+    expect(lab.sourceProblems()).toEqual([]);
+  });
+
+  it("an exact reference (name@version or digest) still resolves while a source is down", async () => {
+    const { lab, flaky } = await withFlaky();
+    const tdd = await lab.resolve("tdd");
+    flaky.down = true;
+    expect((await lab.resolve("tdd@1.0.0")).digest).toBe(tdd.digest);
+    expect((await lab.resolve(tdd.digest)).digest).toBe(tdd.digest);
+  });
+
+  it("a bare name is refused while a source is down, because it might be ambiguous, and works again after", async () => {
+    const { lab, flaky } = await withFlaky();
+    flaky.down = true;
+    const err = await lab.resolve("tdd").catch((e) => e);
+    expect(err).toBeInstanceOf(SourceUnavailableError);
+    expect(err.message).toMatch(/flaky is unavailable \(network down\)/);
+    expect(err.message).toMatch(/name@version or a digest/);
+    flaky.down = false;
+    expect((await lab.resolve("tdd")).name).toBe("tdd");
+  });
+
+  it("a skill pinned from a source that later goes down stays loadable from Heartwood's own store", async () => {
+    const { w, lab, flaky } = await withFlaky();
+    const lint = await lab.resolve("lint");
+    await lab.pin(lint); // absorb copies the exact bytes into the store
+    flaky.down = true;
+    expect((await lab.load(lint)).body).toBe("Run the linter.");
+    expect(await lab.verifyPin(lint)).toBe(true);
+    expect(w.store.root).toContain("store");
+  });
+
+  it("a pin that exists nowhere reachable is a clean not-found, not a crash, while a source is down", async () => {
+    const { lab, flaky } = await withFlaky();
+    flaky.down = true;
+    await expect(
+      lab.load({ name: "ghost", digest: `sha256:${"0".repeat(64)}` }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(await lab.verifyPin({ name: "ghost", digest: `sha256:${"0".repeat(64)}` })).toBe(false);
+  });
+});
+
 describe("GrimoireLab: benchmarks with the real library", () => {
   it("analyze measures a skill against no skill and Heartwood derives its rank from the evidence", async () => {
     const w = await world({ body: "WRITE_OUT then done." });
@@ -212,6 +307,13 @@ describe("GrimoireLab: benchmarks with the real library", () => {
       "tdd-basic",
     );
     expect(w.ctx.log.read({ types: ["skill.ranked"] })).toHaveLength(1);
+    const row = w.ctx.db.prepare("SELECT suite_digest AS suite, agent FROM skill_ranks").get() as {
+      suite: string;
+      agent: string;
+    };
+    expect(row.suite).toBe(a.evidence.suiteDigest);
+    expect(row.suite).toMatch(/^sha256:/);
+    expect(row.agent).toMatch(/^marker-agent/);
   });
 
   it("a skill that does not help ranks low, because lift over no skill is what counts", async () => {
@@ -248,6 +350,9 @@ describe("GrimoireLab: evolving a skill end to end", { timeout: 60_000 }, () => 
 
     expect(out.promoted).toBe(true);
     expect(out.comparison).toMatchObject({ significant: true, verdict: "better", delta: 1 });
+    // the interval is the library's own, computed from the real trials (4/4 vs 0/4 excludes zero)
+    expect(out.comparison.ci?.lower).toBeGreaterThan(0);
+    expect(out.comparison.ci?.upper).toBeLessThanOrEqual(1);
     expect(out.comparison.n).toMatchObject({ candidate: 4, baseline: 4 });
     expect(out.candidate.digest).not.toBe(v1.digest);
 

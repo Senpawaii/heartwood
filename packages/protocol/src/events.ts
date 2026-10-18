@@ -218,12 +218,18 @@ export const payloadSchemas = {
     errors: z.number().int().nonnegative(),
     /** False when the sample was too small or too error-ridden to rank; the rank is then left unchanged. */
     conclusive: z.boolean(),
+    suiteDigest: z.string().optional(),
+    agent: z.string().optional(),
   }),
   "skill.ranked": z.object({
     skill: PinnedSkill,
     rank: SkillRank,
     score: z.number(),
     thresholdsVersion: z.string(),
+    /** Suite the rank was measured on. Absent in events from before ranks were keyed by suite. */
+    suiteDigest: z.string().optional(),
+    /** Agent, version and model (with effort) the rank was measured with. Absent in older events. */
+    agent: z.string().optional(),
   }),
   "skill.evolve_proposed": z.object({
     name: z.string(),

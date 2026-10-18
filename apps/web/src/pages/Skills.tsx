@@ -24,14 +24,24 @@ export function Skills() {
             r.ranks.length === 0 ? (
               <Empty>No skill has been benchmarked yet.</Empty>
             ) : (
-              <Table head={["Skill", "Rank", "Score", "Digest", "Thresholds"]}>
+              <Table head={["Skill", "Rank", "Score", "Measured with", "Digest", "Thresholds"]}>
                 {r.ranks.map((k) => (
-                  <tr key={`${k.name}@${k.digest}`}>
+                  <tr key={`${k.name}@${k.digest}|${k.suiteDigest}|${k.agent}`}>
                     <td className="px-2 py-2 font-medium">{k.name}</td>
                     <td className="px-2 py-2">
                       <Badge className={rankStyle[k.rank]}>{k.rank}</Badge>
                     </td>
                     <td className="px-2 py-2">{k.score.toFixed(2)}</td>
+                    <td
+                      className="px-2 py-2 text-xs text-bark-700"
+                      title={
+                        k.suiteDigest
+                          ? `suite ${k.suiteDigest}`
+                          : "recorded before suites were tracked"
+                      }
+                    >
+                      {k.agent || "unknown"}
+                    </td>
                     <td className="px-2 py-2 font-mono text-xs text-bark-500" title={k.digest}>
                       {k.digest.slice(0, 15)}…
                     </td>

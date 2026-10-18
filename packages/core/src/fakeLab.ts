@@ -11,6 +11,7 @@ import {
   type PromotionGate,
   type ProposedVersion,
   type SkillRef,
+  type SourceProblem,
 } from "./lab.js";
 
 export const digestOf = (body: string): string =>
@@ -37,6 +38,9 @@ export class FakeLab implements LabPort {
   readonly pinned = new Set<string>();
   readonly promotions: { candidate: PinnedSkill; replaces: PinnedSkill }[] = [];
   rewriter?: Rewriter;
+  /** The agent and suite the next benchmarks report, so tests can measure one skill under several. */
+  agent: Evidence["agent"] = { id: "fake" };
+  suite = "default";
 
   addSkill(name: string, body: string, description = name): SkillRef {
     const digest = digestOf(body);
@@ -76,6 +80,10 @@ export class FakeLab implements LabPort {
     return [...this.latest].map(([n, d]) => this.ref(n, d));
   }
 
+  sourceProblems(): SourceProblem[] {
+    return [];
+  }
+
   async resolve(name: string): Promise<SkillRef> {
     const d = this.latest.get(name);
     if (!d) throw new NotFoundError(`skill not found: ${name}`);
@@ -104,8 +112,8 @@ export class FakeLab implements LabPort {
     const countable = r.trials - r.errors;
     return {
       skill: { name: ref.name, digest: ref.digest },
-      suiteDigest: `suite:${ref.name}`,
-      agent: { id: "fake" },
+      suiteDigest: `suite:${ref.name}:${this.suite}`,
+      agent: this.agent,
       ranAt: new Date(0).toISOString(),
       resultRef: `fake:${ref.digest}`,
       trials: r.trials,
@@ -147,11 +155,15 @@ export class FakeLab implements LabPort {
     const cn = c.trials - c.errors;
     const bn = b.trials - b.errors;
     const delta = (cn === 0 ? 0 : c.passes / cn) - (bn === 0 ? 0 : b.passes / bn);
+    const ci = cn > 0 && bn > 0 ? newcombe(c.passes, cn, b.passes, bn) : undefined;
+    const ciOk =
+      !gate.requireCiExcludesZero || (ci !== undefined && (ci.lower > 0 || ci.upper < 0));
     const significant =
       cn >= gate.minTrials &&
       bn >= gate.minTrials &&
       Math.abs(delta) >= gate.tolerance &&
-      delta !== 0;
+      delta !== 0 &&
+      ciOk;
     return {
       candidate: c,
       baseline: b,
@@ -163,6 +175,7 @@ export class FakeLab implements LabPort {
         baselineErrors: b.errors,
       },
       significant,
+      ci,
       verdict: !significant ? "same" : delta > 0 ? "better" : "worse",
     };
   }
@@ -180,4 +193,34 @@ export class FakeLab implements LabPort {
     const loaded = await Promise.all(skills.map((s) => this.load(s)));
     return loaded.map((l) => `### Skill: ${l.ref.name} (${l.ref.digest})\n${l.body}`).join("\n\n");
   }
+}
+
+const Z = 1.96;
+
+/** Wilson score interval for `x` successes in `n` trials (95%). */
+function wilson(x: number, n: number): { p: number; lower: number; upper: number } {
+  const p = x / n;
+  const denom = 1 + (Z * Z) / n;
+  const centre = (p + (Z * Z) / (2 * n)) / denom;
+  const half = (Z * Math.sqrt((p * (1 - p)) / n + (Z * Z) / (4 * n * n))) / denom;
+  return { p, lower: centre - half, upper: centre + half };
+}
+
+/**
+ * Newcombe hybrid-score 95% interval for the difference of two independent proportions, the same
+ * method grimoire-lab uses, so the fake gates a comparison the way the real Lab does.
+ */
+function newcombe(
+  x1: number,
+  n1: number,
+  x2: number,
+  n2: number,
+): { lower: number; upper: number } {
+  const a = wilson(x1, n1);
+  const b = wilson(x2, n2);
+  const d = a.p - b.p;
+  return {
+    lower: d - Math.sqrt((a.p - a.lower) ** 2 + (b.upper - b.p) ** 2),
+    upper: d + Math.sqrt((a.upper - a.p) ** 2 + (b.p - b.lower) ** 2),
+  };
 }

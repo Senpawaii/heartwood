@@ -229,9 +229,17 @@ export function applyProjections(db: Db, e: HeartwoodEvent, rules: Rules): void 
       );
       break;
     case "skill.ranked":
-      db.prepare("INSERT OR REPLACE INTO skill_ranks VALUES (?, ?, ?, ?, ?)").run(
+      // keyed by what produced the measurement: a rank under another suite or model is a different fact
+      db.prepare(
+        `INSERT OR REPLACE INTO skill_ranks
+           (seq, name, digest, suite_digest, agent, rank, score, thresholds_version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        e.seq,
         e.payload.skill.name,
         e.payload.skill.digest,
+        e.payload.suiteDigest ?? "",
+        e.payload.agent ?? "",
         e.payload.rank,
         e.payload.score,
         e.payload.thresholdsVersion,
