@@ -574,7 +574,7 @@ describe("OrcaBackend: model and effort for omp (Claude through Oh My Pi)", () =
   });
 
   describe("on an Orca that refuses a launch-time model (1.4.200)", () => {
-    it("starts omp itself in an Orca terminal with the model:effort, then hands that terminal to worker-start", async () => {
+    it("starts omp itself in an Orca terminal with --model and --thinking, then hands that terminal to worker-start", async () => {
       const { calls, runner } = scripted(
         refusedModel(),
         terminalCreated("term_w"),
@@ -591,7 +591,7 @@ describe("OrcaBackend: model and effort for omp (Claude through Oh My Pi)", () =
         "--title",
         "heartwood: Oakhand",
         "--command",
-        `omp --model ${MODEL}:high`,
+        `omp --model ${MODEL} --thinking high`,
         "--json",
       ]);
       const handoff = calls[2] ?? [];

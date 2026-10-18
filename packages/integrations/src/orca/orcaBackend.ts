@@ -57,13 +57,23 @@ const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._/@+:-]*$/;
 const createsWorktree = (placement: string) =>
   placement === "new-child" || placement === "new-top-level";
 
-/** What to pass Orca for the model and effort. omp has no effort flag in Orca: effort rides on the model id. */
-function launchPreferences(w: StartWorkerInput): { model?: string; effort?: string } {
-  if (!EFFORT_AS_MODEL_SUFFIX.has(w.agent)) return { model: w.model, effort: w.effort };
-  if (!w.model) return {};
+/**
+ * Model and effort for one launch.
+ *
+ * `native` is what Orca's `worker-start` gets. Orca has no omp effort flag and passes `--model <id>` to
+ * omp verbatim, and omp reads a `:level` suffix on a model id, so effort rides on the model there.
+ * `own` is what to type into a terminal this adapter starts itself, where omp's own `--thinking` flag
+ * is available (omp agents only; verified with omp's RPC `get_state`).
+ */
+function launchPreferences(w: StartWorkerInput): {
+  native: { model?: string; effort?: string };
+  own?: { model: string; effort?: string };
+} {
+  if (!EFFORT_AS_MODEL_SUFFIX.has(w.agent)) return { native: { model: w.model, effort: w.effort } };
+  if (!w.model) return { native: {} };
   if (!SAFE_MODEL.test(w.model))
     throw new BackendError(`unsupported characters in model id "${w.model}"`, "bad_request");
-  if (!w.effort) return { model: w.model };
+  if (!w.effort) return { native: { model: w.model }, own: { model: w.model } };
   if (!THINKING_LEVELS.has(w.effort))
     throw new BackendError(
       `unknown effort "${w.effort}" for ${w.agent}; use one of ${[...THINKING_LEVELS].join(", ")}`,
@@ -71,7 +81,10 @@ function launchPreferences(w: StartWorkerInput): { model?: string; effort?: stri
     );
   if (w.model.includes(":"))
     throw new BackendError(`model "${w.model}" already names a level; omit effort`, "bad_request");
-  return { model: `${w.model}:${w.effort}` };
+  return {
+    native: { model: `${w.model}:${w.effort}` },
+    own: { model: w.model, effort: w.effort },
+  };
 }
 
 /** Orca's refusal of a launch-time model (releases before the OMP fix), raised before anything is created. */
@@ -341,14 +354,14 @@ export class OrcaBackend implements WorkerBackend {
     try {
       return await this.workerStart(groupRef, w, sender, [
         ...(w.reuse ? ["--terminal", w.reuse] : ["--agent", w.agent]),
-        ...(prefs.model ? ["--model", prefs.model] : []),
-        ...(prefs.effort ? ["--effort", prefs.effort] : []),
+        ...(prefs.native.model ? ["--model", prefs.native.model] : []),
+        ...(prefs.native.effort ? ["--effort", prefs.native.effort] : []),
       ]);
     } catch (err) {
       // Orca releases before the OMP fix refuse a launch-time model. That check runs before anything is
       // created, so falling back to starting the agent ourselves cannot leave a half-started worker behind.
-      if (!prefs.model || w.reuse || !refusedLaunchModel(err)) throw err;
-      return this.startInOwnTerminal(groupRef, w, sender, prefs.model, err);
+      if (!prefs.own || w.reuse || !refusedLaunchModel(err)) throw err;
+      return this.startInOwnTerminal(groupRef, w, sender, prefs.own, err);
     }
   }
 
@@ -405,7 +418,7 @@ export class OrcaBackend implements WorkerBackend {
     groupRef: string,
     w: StartWorkerInput,
     sender: string[],
-    model: string,
+    own: { model: string; effort?: string },
     refusal: unknown,
   ): Promise<StartedWorker> {
     const why = refusal instanceof Error ? refusal.message : String(refusal);
@@ -423,7 +436,7 @@ export class OrcaBackend implements WorkerBackend {
         "--title",
         `heartwood: ${w.name ?? w.agent}`,
         "--command",
-        `${w.agent} --model ${model}`,
+        `${w.agent} --model ${own.model}${own.effort ? ` --thinking ${own.effort}` : ""}`,
       ],
       TerminalCreated,
     );
