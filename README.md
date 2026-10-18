@@ -44,7 +44,7 @@ The character mechanics borrow vocabulary only; all names and lore are original.
 
 This screenshot comes from a demo daemon with scripted benchmark results; real runs are described in the section on benchmarks.
 
-More: [souls](docs/screenshots/souls.png), [inbox](docs/screenshots/inbox.png).
+More: [souls](docs/screenshots/souls.png), [inbox](docs/screenshots/inbox.png), [events](docs/screenshots/events.png) (an evolution from proposal to verdict).
 
 ## Running the daemon
 

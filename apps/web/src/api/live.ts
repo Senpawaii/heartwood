@@ -32,6 +32,8 @@ export function parseLiveEvent(data: string): HeartwoodEvent | undefined {
 }
 
 /** One-line, human description of an event for the live feed. `nameOf` resolves soul ids to names. */
+const shortDigest = (d: string): string => d.slice(0, 15);
+
 export function describeEvent(
   e: HeartwoodEvent,
   nameOf: (soulId: string) => string = (id) => id,
@@ -76,6 +78,12 @@ export function describeEvent(
       return `${e.payload.skill.name} benchmarked at ${e.payload.score.toFixed(2)}`;
     case "skill.ranked":
       return `${e.payload.skill.name} ranked ${e.payload.rank}`;
+    case "skill.evolve_proposed":
+      return `${e.payload.name}: new version ${shortDigest(e.payload.to.digest)} proposed: ${e.payload.changelog}`;
+    case "skill.evolve_promoted":
+      return `${e.payload.name}: ${shortDigest(e.payload.to.digest)} replaces ${shortDigest(e.payload.from.digest)}`;
+    case "skill.evolve_rejected":
+      return `${e.payload.name}: ${shortDigest(e.payload.to.digest)} not promoted: ${e.payload.reason}`;
     case "memory.episodic_written":
     case "memory.semantic_distilled":
     case "memory.persona_set":
