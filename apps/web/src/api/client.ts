@@ -1,8 +1,11 @@
 import {
+  AnalyzeResponse,
+  EvolveResponse,
   Health,
   Inbox,
   MinistriesResponse,
   ProficiencyResponse,
+  SkillCatalogResponse,
   SkillRanksResponse,
   SkillUsageResponse,
   SoulDetail,
@@ -107,6 +110,7 @@ export function createClient(o: ClientOptions = {}) {
     soulMemory: (id: string) => request("GET", `/souls/${enc(id)}/memory`, SoulMemoryResponse),
     proficiency: (id: string, skill: string) =>
       request("GET", `/souls/${enc(id)}/skills/${enc(skill)}/proficiency`, ProficiencyResponse),
+    skillCatalog: () => request("GET", "/skills", SkillCatalogResponse),
     skillUsage: () => request("GET", "/skills/usage", SkillUsageResponse),
     skillRanks: () => request("GET", "/skills/ranks", SkillRanksResponse),
     warbands: () => request("GET", "/warbands", WarbandsResponse),
@@ -135,6 +139,12 @@ export function createClient(o: ClientOptions = {}) {
       persona: string;
       magiculesSpent?: number;
     }) => request("POST", "/souls", Ok, b),
+    /** Benchmarks a pinned skill. Takes minutes with a real agent. */
+    analyzeSkill: (name: string, digest: string) =>
+      request("POST", "/skills/analyze", AnalyzeResponse, { name, digest }),
+    /** Proposes a new version and promotes it only on proof. Takes minutes with a real agent. */
+    evolveSkill: (name: string, digest: string) =>
+      request("POST", "/skills/evolve", EvolveResponse, { name, digest }),
     evolve: (id: string) => request("POST", `/souls/${enc(id)}/evolve`, Ok),
     absorb: (id: string, name: string) => request("POST", `/souls/${enc(id)}/skills`, Ok, { name }),
     saveMemoryMarkdown: (id: string, md: string) =>

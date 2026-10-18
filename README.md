@@ -40,7 +40,9 @@ The character mechanics borrow vocabulary only; all names and lore are original.
 
 ![A warband and its dispatches](docs/screenshots/warband.png)
 
-![Town-wide skill usage and ranks](docs/screenshots/skills.png)
+![The skill catalog with Analyze and Evolve (results stay on the row), town-wide usage, and ranks by agent](docs/screenshots/skills.png)
+
+This screenshot comes from a demo daemon with scripted benchmark results; real runs are described in the section on benchmarks.
 
 More: [souls](docs/screenshots/souls.png), [inbox](docs/screenshots/inbox.png).
 

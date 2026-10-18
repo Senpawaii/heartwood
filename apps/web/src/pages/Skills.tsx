@@ -1,6 +1,9 @@
-import { useSkillRanks, useSkillUsage } from "../api/provider";
+import type { SkillRef } from "@heartwood/protocol";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useClient, useSkillCatalog, useSkillRanks, useSkillUsage } from "../api/provider";
 import { SkillUsageTable } from "../components/SkillUsageTable";
-import { Async, Badge, Card, Empty, Table } from "../components/ui";
+import { Async, Badge, Button, Card, Empty, ErrorNote, Table } from "../components/ui";
+import { describeAnalysis, describeEvolution } from "../format";
 
 const rankStyle: Record<string, string> = {
   common: "bg-bark-100 text-bark-700",
@@ -9,12 +12,91 @@ const rankStyle: Record<string, string> = {
   ultimate: "bg-heart-500 text-white",
 };
 
+/** One catalog skill with its benchmark actions. Both take minutes with a real agent, so each shows progress and keeps its result. */
+function CatalogRow({ skill }: { skill: SkillRef }) {
+  const c = useClient();
+  const qc = useQueryClient();
+  const refresh = () => void qc.invalidateQueries({ queryKey: ["skillRanks"] });
+  const analyze = useMutation({
+    mutationFn: () => c.analyzeSkill(skill.name, skill.digest),
+    onSuccess: refresh,
+  });
+  const evolve = useMutation({
+    mutationFn: () => c.evolveSkill(skill.name, skill.digest),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["skillCatalog"] }).then(refresh),
+  });
+  const busy = analyze.isPending || evolve.isPending;
+  return (
+    <tr>
+      <td className="px-2 py-2 align-top">
+        <div className="font-medium">{skill.name}</div>
+        <div className="max-w-md text-xs text-bark-500">{skill.description}</div>
+      </td>
+      <td className="px-2 py-2 align-top">{skill.version ?? "—"}</td>
+      <td className="px-2 py-2 align-top font-mono text-xs text-bark-500" title={skill.digest}>
+        {skill.digest.slice(0, 15)}…
+      </td>
+      <td
+        className="max-w-48 truncate px-2 py-2 align-top text-xs text-bark-500"
+        title={skill.source}
+      >
+        {skill.source}
+      </td>
+      <td className="space-y-2 px-2 py-2 align-top">
+        <div className="flex gap-2">
+          <Button variant="ghost" disabled={busy} onClick={() => analyze.mutate()}>
+            {analyze.isPending ? "Benchmarking…" : "Analyze"}
+          </Button>
+          <Button variant="ghost" disabled={busy} onClick={() => evolve.mutate()}>
+            {evolve.isPending ? "Evolving…" : "Evolve"}
+          </Button>
+        </div>
+        {analyze.data && !busy && (
+          <p className="text-xs text-bark-700">{describeAnalysis(analyze.data)}</p>
+        )}
+        {evolve.data && !busy && (
+          <p className="text-xs text-bark-700">{describeEvolution(evolve.data)}</p>
+        )}
+        <ErrorNote error={analyze.error ?? evolve.error} />
+      </td>
+    </tr>
+  );
+}
+
 export function Skills() {
+  const catalog = useSkillCatalog();
   const usage = useSkillUsage();
   const ranks = useSkillRanks();
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Skills</h1>
+      <Card title="Catalog">
+        <Async q={catalog}>
+          {(k) => (
+            <div className="space-y-3">
+              {k.problems.map((p) => (
+                <p
+                  key={p.source}
+                  role="alert"
+                  className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+                >
+                  Source {p.source} is unavailable ({p.message}); its skills are not listed.
+                </p>
+              ))}
+              {k.skills.length === 0 ? (
+                <Empty>No skills in the catalog.</Empty>
+              ) : (
+                <Table head={["Skill", "Version", "Digest", "Source", "Benchmark"]}>
+                  {/* keyed by name: a promotion changes the digest, and the row must keep showing its result */}
+                  {k.skills.map((sk) => (
+                    <CatalogRow key={sk.name} skill={sk} />
+                  ))}
+                </Table>
+              )}
+            </div>
+          )}
+        </Async>
+      </Card>
       <Card title="Town-wide usage">
         <Async q={usage}>{(u) => <SkillUsageTable usage={u.usage} />}</Async>
       </Card>

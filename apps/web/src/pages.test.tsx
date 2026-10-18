@@ -30,7 +30,7 @@ function fakeDaemon(routes: Routes): FakeDaemon {
         JSON.stringify({ error: "not_found", message: `no route ${method} ${path}` }),
         { status: 404 },
       );
-    const out = typeof route === "function" ? route({ method, body }) : route;
+    const out = await (typeof route === "function" ? route({ method, body }) : route);
     return new Response(JSON.stringify(out), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -335,6 +335,7 @@ describe("pages", () => {
     const d = fakeDaemon({
       "GET /health": ready,
       "GET /inbox": inbox,
+      "GET /skills": { skills: [], problems: [] },
       "GET /skills/usage": { usage: [] },
       "GET /skills/ranks": {
         ranks: [
@@ -351,6 +352,184 @@ describe("pages", () => {
     expect(screen.getAllByText("tdd")).toHaveLength(3);
     expect(screen.getByText("ultimate")).toBeTruthy();
     expect(screen.getByText("extra")).toBeTruthy();
+  });
+
+  describe("skills catalog actions", () => {
+    const greeter = {
+      name: "greeter",
+      digest: "sha256:aaaabbbbccccdddd",
+      description: "Use when asked to write a greeting file.",
+      version: "1.0.0",
+      source: "/skills",
+    };
+    const base = {
+      "GET /health": ready,
+      "GET /inbox": inbox,
+      "GET /skills/usage": { usage: [] },
+      "GET /skills/ranks": { ranks: [] },
+    };
+    const evidence = {
+      trials: 10,
+      passes: 0,
+      errors: 0,
+      passRate: 0,
+      agent: { id: "omp", version: "18.5.1", model: "anthropic/claude-sonnet-5-5:low" },
+      vsBaseline: { delta: 0 },
+    };
+
+    it("Analyze benchmarks exactly the pinned digest and reports the outcome", async () => {
+      const d = fakeDaemon({
+        ...base,
+        "GET /skills": { skills: [greeter], problems: [] },
+        "POST /skills/analyze": { evidence, rank: "common" },
+      });
+      mount(d, "/skills");
+      fireEvent.click(await screen.findByRole("button", { name: "Analyze" }));
+      expect(
+        await screen.findByText(/rank common · 0\/10 trials passed · \+0 pts vs no skill/),
+      ).toBeTruthy();
+      const call = d.calls.find((c) => c.path === "/skills/analyze");
+      expect(JSON.parse(call?.body ?? "{}")).toEqual({ name: "greeter", digest: greeter.digest });
+    });
+
+    it("says so when a benchmark was inconclusive instead of inventing a rank", async () => {
+      const d = fakeDaemon({
+        ...base,
+        "GET /skills": { skills: [greeter], problems: [] },
+        "POST /skills/analyze": { evidence: { ...evidence, errors: 6 }, rank: null },
+      });
+      mount(d, "/skills");
+      fireEvent.click(await screen.findByRole("button", { name: "Analyze" }));
+      expect(
+        await screen.findByText(/inconclusive, no rank · 0\/10 trials passed · 6 errored/),
+      ).toBeTruthy();
+    });
+
+    it("Evolve reports a refused proposal with its evidence, and a promotion with the new digest", async () => {
+      let answer: unknown = {
+        promoted: false,
+        candidate: { name: "greeter", digest: "sha256:1111222233334444" },
+        comparison: {
+          delta: 0,
+          verdict: "same",
+          significant: false,
+          ci: { lower: -0.28, upper: 0.28 },
+        },
+      };
+      const d = fakeDaemon({
+        ...base,
+        "GET /skills": { skills: [greeter], problems: [] },
+        "POST /skills/evolve": () => answer,
+      });
+      mount(d, "/skills");
+      fireEvent.click(await screen.findByRole("button", { name: "Evolve" }));
+      expect(
+        await screen.findByText(
+          "Kept the current version (same, +0 pts, 95% CI −28 pts to +28 pts)",
+        ),
+      ).toBeTruthy();
+
+      answer = {
+        promoted: true,
+        candidate: { name: "greeter", digest: "sha256:9999888877776666" },
+        comparison: {
+          delta: 1,
+          verdict: "better",
+          significant: true,
+          ci: { lower: 0.39, upper: 1 },
+        },
+      };
+      fireEvent.click(screen.getByRole("button", { name: "Evolve" }));
+      expect(await screen.findByText(/Promoted sha256:99998888… \(better, \+100 pts/)).toBeTruthy();
+    });
+
+    it("keeps showing the evolution result after the promotion changes the skill's digest", async () => {
+      let promoted = false;
+      const newer = { ...greeter, digest: "sha256:9999888877776666", version: "1.1.0" };
+      const d = fakeDaemon({
+        ...base,
+        "GET /skills": () => ({ skills: [promoted ? newer : greeter], problems: [] }),
+        "POST /skills/evolve": () => {
+          promoted = true;
+          return {
+            promoted: true,
+            candidate: { name: "greeter", digest: newer.digest },
+            comparison: { delta: 1, verdict: "better", significant: true },
+          };
+        },
+      });
+      mount(d, "/skills");
+      fireEvent.click(await screen.findByRole("button", { name: "Evolve" }));
+      expect(await screen.findByText(/Promoted sha256:99998888…/)).toBeTruthy();
+      // the catalog refetch has landed: the row now shows the new version and still the result
+      expect(await screen.findByText("1.1.0")).toBeTruthy();
+      expect(screen.getByText(/Promoted sha256:99998888…/)).toBeTruthy();
+    });
+
+    it("disables both buttons while a benchmark runs, so one skill is never benchmarked twice at once", async () => {
+      let finish: (v: unknown) => void = () => undefined;
+      const pending = new Promise((resolve) => {
+        finish = resolve;
+      });
+      const d = fakeDaemon({
+        ...base,
+        "GET /skills": { skills: [greeter], problems: [] },
+        "POST /skills/analyze": () => pending,
+      });
+      mount(d, "/skills");
+      fireEvent.click(await screen.findByRole("button", { name: "Analyze" }));
+      const running = await screen.findByRole("button", { name: "Benchmarking…" });
+      expect((running as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Evolve" }) as HTMLButtonElement).disabled).toBe(
+        true,
+      );
+      finish({ evidence, rank: "common" });
+      expect(await screen.findByText(/rank common/)).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Analyze" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      );
+    });
+
+    it("shows the daemon's refusal when benchmarks are not configured", async () => {
+      const fetchFn = (async (url: string, init: RequestInit = {}) => {
+        const path = url.replace(/^\/api/, "");
+        const refused = init.method === "POST";
+        const body = refused
+          ? {
+              error: "lab_unavailable",
+              message: "analyze: no AgentAdapter is configured, so benchmarks cannot run",
+            }
+          : (
+              { ...base, "GET /skills": { skills: [greeter], problems: [] } } as Record<
+                string,
+                unknown
+              >
+            )[`GET ${path}`];
+        return new Response(JSON.stringify(body), { status: refused ? 501 : 200 });
+      }) as typeof fetch;
+      render(
+        <MemoryRouter initialEntries={["/skills"]}>
+          <AppProviders client={createClient({ fetch: fetchFn })} live={false}>
+            <App />
+          </AppProviders>
+        </MemoryRouter>,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Analyze" }));
+      expect(await screen.findByText(/benchmarks cannot run \(lab_unavailable\)/)).toBeTruthy();
+    });
+
+    it("warns about a catalog source that is down, and still lists the others", async () => {
+      const d = fakeDaemon({
+        ...base,
+        "GET /skills": {
+          skills: [greeter],
+          problems: [{ source: "flaky", operation: "list", message: "network down" }],
+        },
+      });
+      mount(d, "/skills");
+      expect(await screen.findByText(/Source flaky is unavailable \(network down\)/)).toBeTruthy();
+      expect(screen.getByText("greeter")).toBeTruthy();
+    });
   });
 
   it("shows a token hint when the daemon answers 401", async () => {
