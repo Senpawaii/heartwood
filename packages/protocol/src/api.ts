@@ -107,6 +107,8 @@ export const AnalyzeResponse = z.object({
   rank: z.string().nullable(),
 });
 
+export type AnalyzeResponse = z.infer<typeof AnalyzeResponse>;
+
 /** Result of proposing a new version. A refused proposal still answers 200 with `promoted: false`. */
 export const EvolveResponse = z.object({
   promoted: z.boolean(),
