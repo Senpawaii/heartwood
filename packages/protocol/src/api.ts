@@ -67,6 +67,61 @@ export const SkillRankRow = z.object({
 });
 export type SkillRankRow = z.infer<typeof SkillRankRow>;
 
+/** One skill the Lab offers. `digest` is its identity; name, version and source are labels. */
+export const SkillRef = z.object({
+  name: z.string(),
+  digest: z.string(),
+  description: z.string(),
+  version: z.string().optional(),
+  source: z.string(),
+});
+export type SkillRef = z.infer<typeof SkillRef>;
+
+export const SourceProblem = z.object({
+  source: z.string(),
+  operation: z.enum(["list", "load"]),
+  message: z.string(),
+});
+export type SourceProblem = z.infer<typeof SourceProblem>;
+
+/** `problems` lists catalog sources that are down; `skills` is built from the others. */
+export const SkillCatalogResponse = z.object({
+  skills: z.array(SkillRef),
+  problems: z.array(SourceProblem),
+});
+
+/** Result of benchmarking a skill. `rank` is null when the run was inconclusive. */
+export const AnalyzeResponse = z.object({
+  evidence: z.object({
+    trials: z.number(),
+    passes: z.number(),
+    errors: z.number(),
+    passRate: z.number(),
+    agent: z.object({
+      id: z.string(),
+      version: z.string().optional(),
+      model: z.string().optional(),
+    }),
+    vsBaseline: z.object({ delta: z.number() }).optional(),
+  }),
+  rank: z.string().nullable(),
+});
+
+export type AnalyzeResponse = z.infer<typeof AnalyzeResponse>;
+
+/** Result of proposing a new version. A refused proposal still answers 200 with `promoted: false`. */
+export const EvolveResponse = z.object({
+  promoted: z.boolean(),
+  candidate: z.object({ name: z.string(), digest: z.string() }),
+  comparison: z.object({
+    delta: z.number(),
+    verdict: z.enum(["better", "same", "worse"]),
+    significant: z.boolean(),
+    ci: z.object({ lower: z.number(), upper: z.number() }).optional(),
+  }),
+});
+export type EvolveResponse = z.infer<typeof EvolveResponse>;
+
 export const Warband = z.object({
   warbandId: z.string(),
   objective: z.string(),

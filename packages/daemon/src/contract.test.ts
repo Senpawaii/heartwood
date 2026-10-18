@@ -1,8 +1,11 @@
 import {
+  AnalyzeResponse,
+  EvolveResponse,
   Health,
   Inbox,
   MinistriesResponse,
   ProficiencyResponse,
+  SkillCatalogResponse,
   SkillRanksResponse,
   SkillUsageResponse,
   SoulDetail,
@@ -26,7 +29,18 @@ describe("API contract (shared response schemas)", () => {
     const ref = b.lab.addSkill("tdd", "Write the test first.");
     b.lab.setScore(ref, 0.8);
     await json(b.app, "POST", `/souls/${t.worker}/skills`, { name: "tdd" });
-    await json(b.app, "POST", "/skills/analyze", { name: "tdd", digest: ref.digest });
+    const analyzed = await json(b.app, "POST", "/skills/analyze", {
+      name: "tdd",
+      digest: ref.digest,
+    });
+    expect(AnalyzeResponse.parse(analyzed.body).rank).toBe("unique");
+    b.lab.rewriter = (skill) => ({ body: `${skill.body} Be explicit.`, changelog: "Be explicit." });
+    const evolved = await json(b.app, "POST", "/skills/evolve", {
+      name: "tdd",
+      digest: ref.digest,
+    });
+    expect(evolved).toMatchObject({ status: 200 });
+    expect(EvolveResponse.parse(evolved.body).candidate.name).toBe("tdd");
     const wb = await formWarband(b, t.foreman, [t.worker]);
     const d = await json(b.app, "POST", `/warbands/${wb.warbandId}/dispatches`, {
       soulId: t.worker,
@@ -68,7 +82,11 @@ describe("API contract (shared response schemas)", () => {
       skill: "tdd",
       injectedOnly: 1,
     });
-    expect(SkillRanksResponse.parse(await get("/skills/ranks")).ranks).toHaveLength(1);
+    expect(SkillCatalogResponse.parse(await get("/skills")).skills.map((s) => s.name)).toContain(
+      "tdd",
+    );
+    // the skill and its evolved candidate
+    expect(SkillRanksResponse.parse(await get("/skills/ranks")).ranks).toHaveLength(2);
     expect(WarbandsResponse.parse(await get("/warbands")).warbands).toHaveLength(1);
     expect(WarbandDetail.parse(await get(`/warbands/${wb.warbandId}`)).dispatches[0]).toMatchObject(
       { state: "settled" },

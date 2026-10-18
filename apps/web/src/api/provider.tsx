@@ -163,6 +163,10 @@ export const useProficiency = (id: string, skill: string) => {
     queryFn: () => c.proficiency(id, skill),
   });
 };
+export const useSkillCatalog = () => {
+  const c = useClient();
+  return useQuery({ queryKey: ["skillCatalog"], queryFn: () => c.skillCatalog() });
+};
 export const useSkillUsage = () => {
   const c = useClient();
   return useQuery({ queryKey: ["skillUsage"], queryFn: () => c.skillUsage() });

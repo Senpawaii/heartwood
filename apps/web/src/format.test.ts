@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { pct, plural, sparklinePoints, timeAgo } from "./format";
+import {
+  describeAnalysis,
+  describeEvolution,
+  pct,
+  plural,
+  sparklinePoints,
+  timeAgo,
+} from "./format";
 
 describe("format", () => {
   it("draws a proficiency series left to right, high values near the top, clamped to 0..1", () => {
@@ -37,5 +44,39 @@ describe("format", () => {
     expect(timeAgo("2026-10-17T11:00:00Z", now)).toBe("1h ago");
     expect(timeAgo("2026-10-15T12:00:00Z", now)).toBe("2d ago");
     expect(timeAgo("2026-10-17T12:00:05Z", now)).toBe("0s ago"); // clock skew never goes negative
+  });
+});
+
+describe("describeAnalysis", () => {
+  const agent = { id: "omp" };
+  it("states the rank, pass count and lift over no skill", () => {
+    expect(
+      describeAnalysis({
+        evidence: {
+          trials: 10,
+          passes: 9,
+          errors: 0,
+          passRate: 0.9,
+          agent,
+          vsBaseline: { delta: 0.4 },
+        },
+        rank: "unique",
+      }),
+    ).toBe("rank unique · 9/10 trials passed · +40 pts vs no skill");
+  });
+  it("shows a negative lift with a minus sign, and errors only when there are some", () => {
+    expect(
+      describeAnalysis({
+        evidence: {
+          trials: 10,
+          passes: 2,
+          errors: 1,
+          passRate: 0.2,
+          agent,
+          vsBaseline: { delta: -0.3 },
+        },
+        rank: null,
+      }),
+    ).toBe("inconclusive, no rank · 2/10 trials passed · 1 errored · −30 pts vs no skill");
   });
 });

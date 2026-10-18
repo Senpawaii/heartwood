@@ -11,7 +11,7 @@ const KEYS_BY_PREFIX: Record<string, readonly string[]> = {
   escalation: ["town", "inbox"],
   question: ["town", "inbox"],
   memory: ["memory", "soul"],
-  skill: ["skillUsage", "skillRanks", "soul", "proficiency"],
+  skill: ["skillUsage", "skillRanks", "skillCatalog", "soul", "proficiency"],
 };
 
 /** Which query keys an event invalidates. Unknown event families refresh nothing. */
