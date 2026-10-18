@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "pnpm -r build",
+    "start": "pnpm --filter @heartwood/web build && tsx --env-file-if-exists=.env packages/daemon/src/main.ts",
     "typecheck": "tsc -b && pnpm --filter @heartwood/web typecheck",
     "test": "vitest run",
     "lint": "biome check ."
@@ -15,6 +16,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
     "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   }

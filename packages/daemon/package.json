@@ -14,6 +14,7 @@
     "start": "tsx src/main.ts"
   },
   "dependencies": {
+    "@fastify/static": "^10.1.6",
     "@grimoire/adapters": "https://github.com/Senpawaii/grimoire-lab/releases/download/v0.3.1/grimoire-adapters-0.3.1.tgz",
     "@grimoire/core": "https://github.com/Senpawaii/grimoire-lab/releases/download/v0.3.1/grimoire-core-0.3.1.tgz",
     "@heartwood/core": "workspace:*",
